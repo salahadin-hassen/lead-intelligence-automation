@@ -305,6 +305,75 @@ Configurable rule sets/weights, per-source tuning, ML models, prompt
 engineering, LLM fallback chains, n8n, CRM, auth, Docker, workers, email,
 Telegram, frontend, `PATCH`/`DELETE`, bulk export.
 
+## Milestone 5: Lead Status Workflow
+
+```
+PATCH /leads/{lead_id}  {"status": "contacted"}
+    → 200 LeadResponse (updated) | 404 | 422
+```
+
+Completes the intake → retrieve → score → qualify loop with no external
+dependencies (n8n/CRM remain out of scope; nothing new to install, no keys).
+
+### Status vocabulary (closed set)
+
+`new` → `contacted` → `qualified` → `closed`
+
+- `status` is a required request field validated as a Pydantic `Literal` of
+  the four values → unknown/missing/whitespace-only → **422**
+- **No transition graph enforcement in M5**: any known status may be set from
+  any current status (e.g. reopening a closed lead is allowed); same-status
+  PATCH is an idempotent no-op → **200**
+- Non-integer path id → **422**; unknown lead → **404** (generic detail)
+- Existing rows (all `new`) are unaffected; POST keeps defaulting to `new`
+- `GET /leads?status=` keeps Milestone 2 semantics (unknown value → empty 200)
+
+### Schema — `sql/003_lead_status_workflow.sql`
+
+```sql
+ALTER TABLE leads DROP CONSTRAINT IF EXISTS leads_status_valid;
+ALTER TABLE leads
+    ADD CONSTRAINT leads_status_valid
+    CHECK (status IN ('new', 'contacted', 'qualified', 'closed'));
+```
+
+Applied automatically by lifespan init and test setup (both already run every
+file in `sql/` in sorted order). The database constraint is the authoritative
+guard against invalid statuses, mirroring the Milestone 1 unique-constraint
+pattern.
+
+### Implementation shape
+
+1. `app/models.py`: `LeadStatusUpdate(status: Literal["new", "contacted", "qualified", "closed"])`
+2. `app/db.py`: `update_lead_status(lead_id, status) -> dict | None` — one
+   parameterized `UPDATE ... RETURNING <lead columns>`; `None` → 404 in route
+3. `app/routes/leads.py`: `PATCH /leads/{lead_id}` handler — validates body
+   (FastAPI/Pydantic), calls db, maps `None` → 404, returns `LeadResponse`
+   (score fields untouched by the update)
+4. No changes to config, scoring, pyproject, .env.example, or M1–M4 code
+
+### Tests (Milestone 5, minimum)
+
+1. `new` → `contacted` → **200**, response shows `contacted`
+2. Each vocabulary value accepted (parametrized: contacted, qualified, closed, new)
+3. Unknown status value → **422**
+4. Missing `status` field → **422**
+5. Whitespace-only status → **422**
+6. Non-integer `lead_id` → **422**
+7. Unknown `lead_id` → **404**
+8. Status actually persisted (direct `SELECT`)
+9. Idempotent same-status PATCH → **200** twice
+10. After update, `GET /leads?status=contacted` includes the lead and
+    `?status=new` excludes it
+11. Direct SQL with an invalid status is rejected by the DB CHECK
+12. Existing M1–M4 suites remain green unchanged
+
+### Out of scope for Milestone 5
+
+Editing other lead fields (name/email/message), DELETE, transition-graph
+enforcement, bulk/batch updates, audit/history of status changes, n8n, CRM,
+auth, Docker, workers, email, Telegram, frontend.
+
 ## Out of scope
 
 n8n, CRM, authentication, Docker, background workers, unrelated features.

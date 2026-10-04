@@ -60,6 +60,13 @@ _SET_LEAD_SCORE_SQL = """
     RETURNING scored_at
 """
 
+_UPDATE_LEAD_STATUS_SQL = f"""
+    UPDATE leads
+    SET status = %(status)s
+    WHERE id = %(id)s
+    RETURNING {_LEAD_COLUMNS}
+"""
+
 _pool: ConnectionPool | None = None
 
 
@@ -153,3 +160,16 @@ def set_lead_score(lead_id: int, score: int, score_reason: str) -> datetime:
     if row is None:
         raise RuntimeError("UPDATE leads ... RETURNING scored_at returned no row")
     return row["scored_at"]
+
+
+def update_lead_status(lead_id: int, status_value: str) -> dict | None:
+    """Update a lead's status and return the updated row.
+
+    Returns None when no lead with that id exists (mapped to 404 by the route).
+    """
+    with _get_pool().connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(
+                _UPDATE_LEAD_STATUS_SQL, {"status": status_value, "id": lead_id}
+            ).fetchone()
+    return dict(row) if row is not None else None

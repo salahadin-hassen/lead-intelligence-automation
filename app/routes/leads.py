@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app import db, scoring
 from app.errors import DuplicateLeadError
-from app.models import LeadCreate, LeadListResponse, LeadResponse, ScoringResult
+from app.models import (
+    LeadCreate,
+    LeadListResponse,
+    LeadResponse,
+    LeadStatusUpdate,
+    ScoringResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +101,17 @@ def list_leads(
 @router.get("/leads/{lead_id}", response_model=LeadResponse)
 def get_lead(lead_id: int) -> LeadResponse:
     row = db.get_lead(lead_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lead not found",
+        )
+    return _to_response(row)
+
+
+@router.patch("/leads/{lead_id}", response_model=LeadResponse)
+def update_lead_status(lead_id: int, update: LeadStatusUpdate) -> LeadResponse:
+    row = db.update_lead_status(lead_id, update.status)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

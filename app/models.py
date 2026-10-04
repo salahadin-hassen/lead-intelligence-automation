@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -47,3 +48,10 @@ class ScoringResult(BaseModel):
 
     score: int = Field(ge=0, le=100)
     reason: str = Field(min_length=1)
+
+
+LeadStatus = Literal["new", "contacted", "qualified", "closed"]
+
+
+class LeadStatusUpdate(BaseModel):
+    status: LeadStatus
