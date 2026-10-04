@@ -1,0 +1,30 @@
+[project]
+name = "lead-intelligence-automation"
+version = "0.1.0"
+description = "Lead intake API: POST /leads stored in PostgreSQL."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "pydantic[email]",
+    "psycopg[binary]",
+    "psycopg-pool",
+    "pydantic-settings",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "httpx",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app", "app.routes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Environment / secrets
+.env
+.env.*
+
+# Testing
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+!.env.example

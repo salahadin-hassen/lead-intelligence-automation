@@ -1,0 +1,80 @@
+"""PostgreSQL access layer.
+
+All SQL and psycopg-specific exceptions stay inside this module. The API
+route only sees application-level results and errors (e.g.
+:class:`app.errors.DuplicateLeadError`).
+"""
+
+from pathlib import Path
+
+import psycopg
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+
+from app.errors import DuplicateLeadError
+from app.models import LeadCreate
+
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "sql" / "001_create_leads.sql"
+
+_INSERT_LEAD_SQL = """
+    INSERT INTO leads (name, email, company, message, source, external_id)
+    VALUES (%s, %s, %s, %s, %s, %s)
+    RETURNING id, status, created_at
+"""
+
+_pool: ConnectionPool | None = None
+
+
+def configure_pool(database_url: str) -> None:
+    """Create the application connection pool from the configured DATABASE_URL."""
+    global _pool
+    close_pool()
+    _pool = ConnectionPool(conninfo=database_url, min_size=1, max_size=4, open=False)
+    _pool.open()
+
+
+def close_pool() -> None:
+    """Close the application connection pool if it is open."""
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+
+
+def _get_pool() -> ConnectionPool:
+    if _pool is None:
+        raise RuntimeError("Database pool is not configured. Call configure_pool() first.")
+    return _pool
+
+
+def init_schema() -> None:
+    """Apply the SQL schema/init file (idempotent)."""
+    schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
+    with _get_pool().connection() as conn:
+        conn.execute(schema_sql)
+
+
+def create_lead(lead: LeadCreate) -> dict:
+    """Insert a lead and return its database-generated fields.
+
+    Raises:
+        DuplicateLeadError: if a lead with the same (source, external_id)
+            already exists, translated from the database unique violation.
+    """
+    params = (
+        lead.name,
+        str(lead.email),
+        lead.company,
+        lead.message,
+        lead.source,
+        lead.external_id,
+    )
+    try:
+        with _get_pool().connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                row = cur.execute(_INSERT_LEAD_SQL, params).fetchone()
+    except psycopg.errors.UniqueViolation as exc:
+        raise DuplicateLeadError(source=lead.source, external_id=lead.external_id) from exc
+    if row is None:  # pragma: no cover - INSERT ... RETURNING always yields a row
+        raise RuntimeError("INSERT into leads returned no row")
+    return dict(row)
