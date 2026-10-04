@@ -30,3 +30,10 @@ class LeadResponse(BaseModel):
     source: str
     status: str
     created_at: datetime
+
+
+class LeadListResponse(BaseModel):
+    items: list[LeadResponse]
+    total: int
+    limit: int
+    offset: int

@@ -92,6 +92,67 @@ CREATE TABLE leads (
   application shutdown (lifespan).
 - Keep the implementation minimal.
 
+## Milestone 2: Lead Retrieval
+
+```
+GET /leads?status=…&source=…&limit=…&offset=…   →  200 + items/total
+GET /leads/{lead_id}                            →  200 | 404
+```
+
+### Endpoints
+
+`GET /leads` — list leads, newest first (`created_at DESC, id DESC`).
+
+| Query param | Rules |
+|---|---|
+| `status` | optional exact-match filter; unknown value → empty `200` |
+| `source` | optional exact-match filter; unknown value → empty `200` |
+| `limit` | optional, integer, default `20`, min `1`, max `100` |
+| `offset` | optional, integer, default `0`, min `0` |
+
+Response `200`:
+
+```json
+{"items": [LeadResponse, ...], "total": 123, "limit": 20, "offset": 0}
+```
+
+`GET /leads/{lead_id}`:
+
+- `lead_id` path param must be an integer → otherwise **422**.
+- Found → **200** with `LeadResponse` (same model as POST).
+- Not found → **404** with a generic detail; no database error details exposed.
+
+### Schema / migrations
+
+No schema changes. Reuse table `leads` and its existing indexes/constraint.
+
+### Engineering requirements (Milestone 2)
+
+1. Parameterized SQL only; all SQL stays in `app/db.py`, none in routes.
+2. Reuse the existing connection pool and lifespan; no new dependencies.
+3. Read-only endpoints: `GET` requests must not mutate the database.
+4. Route maps "not found" to 404; unexpected exceptions are not swallowed.
+5. Tests use the same `TEST_DATABASE_URL` injection and fail loudly if it is
+   missing; `TRUNCATE leads RESTART IDENTITY` before each test; no skips/xfails.
+
+### Tests (Milestone 2, minimum)
+
+1. No leads → `GET /leads` returns `200` with empty `items` and `total: 0`
+2. Created lead appears in the list with correct fields
+3. `status` filter narrows results; unknown `status` → empty `200`
+4. `source` filter narrows results; unknown `source` → empty `200`
+5. `limit`/`offset` paginate correctly; `total` unaffected by paging
+6. Default ordering is newest first
+7. `GET /leads/{id}` of an existing lead → `200` with its `lead_id`
+8. `GET /leads/{id}` of a missing lead → `404`
+9. Non-integer `lead_id` → `422`
+10. `limit=0`, `limit=101`, `offset=-1` → `422`
+
+### Out of scope for Milestone 2
+
+AI, n8n, CRM, authentication, Docker, background workers, email, Telegram,
+frontend, write/update/delete endpoints (`PATCH`, `DELETE`), bulk export.
+
 ## Out of scope
 
 AI, n8n, CRM, authentication, Docker, background workers, unrelated features.

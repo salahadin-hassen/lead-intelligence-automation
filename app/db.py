@@ -22,6 +22,34 @@ _INSERT_LEAD_SQL = """
     RETURNING id, status, created_at
 """
 
+_LEAD_COLUMNS = "id, name, email, company, source, status, created_at"
+
+# NULL filters are handled in SQL with (%(x)s::text IS NULL OR col = %(x)s) so
+# the query text is static and user values are only ever bound parameters.
+# The ::text cast is required: PostgreSQL cannot infer the type of a parameter
+# used in IS NULL ("could not determine data type of parameter $1").
+_LIST_LEADS_SQL = f"""
+    SELECT {_LEAD_COLUMNS}
+    FROM leads
+    WHERE (%(status)s::text IS NULL OR status = %(status)s)
+      AND (%(source)s::text IS NULL OR source = %(source)s)
+    ORDER BY created_at DESC, id DESC
+    LIMIT %(limit)s OFFSET %(offset)s
+"""
+
+_COUNT_LEADS_SQL = """
+    SELECT count(*) AS total
+    FROM leads
+    WHERE (%(status)s::text IS NULL OR status = %(status)s)
+      AND (%(source)s::text IS NULL OR source = %(source)s)
+"""
+
+_GET_LEAD_SQL = f"""
+    SELECT {_LEAD_COLUMNS}
+    FROM leads
+    WHERE id = %s
+"""
+
 _pool: ConnectionPool | None = None
 
 
@@ -78,3 +106,26 @@ def create_lead(lead: LeadCreate) -> dict:
     if row is None:  # pragma: no cover - INSERT ... RETURNING always yields a row
         raise RuntimeError("INSERT into leads returned no row")
     return dict(row)
+
+
+def list_leads(
+    status: str | None,
+    source: str | None,
+    limit: int,
+    offset: int,
+) -> tuple[list[dict], int]:
+    """Return one page of leads (newest first) and the total matching count."""
+    params = {"status": status, "source": source, "limit": limit, "offset": offset}
+    with _get_pool().connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            items = cur.execute(_LIST_LEADS_SQL, params).fetchall()
+            total = cur.execute(_COUNT_LEADS_SQL, params).fetchone()["total"]
+    return [dict(item) for item in items], total
+
+
+def get_lead(lead_id: int) -> dict | None:
+    """Return one lead by id, or None when no such lead exists."""
+    with _get_pool().connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(_GET_LEAD_SQL, (lead_id,)).fetchone()
+    return dict(row) if row is not None else None
