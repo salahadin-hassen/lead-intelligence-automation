@@ -9,6 +9,7 @@ import psycopg
 import pytest
 from pydantic import ValidationError
 
+from app import scoring
 from app.config import get_settings
 from app.main import app
 from app.models import ScoringResult
@@ -44,7 +45,7 @@ def install_scorer():
     app.dependency_overrides.pop(get_scorer, None)
 
 
-def test_missing_api_key_skips_scoring(client, monkeypatch) -> None:
+def test_missing_api_key_uses_heuristic_scorer(client, monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "")
     get_settings.cache_clear()
     try:
@@ -55,9 +56,10 @@ def test_missing_api_key_skips_scoring(client, monkeypatch) -> None:
 
     assert response.status_code == 201
     body = response.json()
-    assert body["score"] is None
-    assert body["score_reason"] is None
-    assert body["scored_at"] is None
+    assert isinstance(body["score"], int)
+    assert 0 <= body["score"] <= 100
+    assert body["score_reason"]
+    assert body["scored_at"]
 
 
 def test_fake_scorer_result_returned(client, install_scorer) -> None:
@@ -159,3 +161,192 @@ def test_scoring_result_enforces_bounds() -> None:
         ScoringResult(score=101, reason="out of range")
     with pytest.raises(ValidationError):
         ScoringResult(score=50, reason="")
+
+
+# --- Milestone 4: offline heuristic scoring ---------------------------------
+
+HIGH_INTENT_MESSAGE = (
+    "We are evaluating tools for our enterprise team. Please schedule a "
+    "demo and share pricing for integration with our API."
+)
+
+
+class _FakeLLMResponse:
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return {
+            "choices": [
+                {"message": {"content": '{"score": 77, "reason": "LLM says high fit."}'}}
+            ]
+        }
+
+
+def test_high_intent_scores_higher_than_junk(client, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+    try:
+        intent = client.post(
+            "/leads", json={**VALID_PAYLOAD, "message": HIGH_INTENT_MESSAGE}
+        )
+        junk = client.post(
+            "/leads",
+            json={**VALID_PAYLOAD, "message": "asdf", "external_id": "ext-3002"},
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert intent.status_code == junk.status_code == 201
+    intent_score = intent.json()["score"]
+    junk_score = junk.json()["score"]
+    assert 0 <= junk_score < intent_score <= 100
+    assert intent_score - junk_score >= 30
+
+
+def test_corporate_domain_scores_higher_than_free_mail(client, monkeypatch) -> None:
+    message = "Hello, we would like to learn more about the product."
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+    try:
+        corp = client.post(
+            "/leads",
+            json={**VALID_PAYLOAD, "message": message, "email": "ada@company.example"},
+        )
+        free = client.post(
+            "/leads",
+            json={
+                **VALID_PAYLOAD,
+                "message": message,
+                "email": "ada@gmail.com",
+                "external_id": "ext-3003",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert corp.status_code == free.status_code == 201
+    corp_score = corp.json()["score"]
+    free_score = free.json()["score"]
+    assert 0 <= free_score < corp_score <= 100
+    assert corp_score - free_score == 20
+
+
+def test_identical_payloads_score_identically(client, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+    try:
+        first = client.post("/leads", json={**VALID_PAYLOAD, "external_id": "ext-3004"})
+        second = client.post("/leads", json={**VALID_PAYLOAD, "external_id": "ext-3005"})
+    finally:
+        get_settings.cache_clear()
+
+    assert first.status_code == second.status_code == 201
+    assert first.json()["score"] == second.json()["score"]
+    assert first.json()["score_reason"] == second.json()["score_reason"]
+
+
+def test_heuristic_score_persisted_and_visible(client, schema_ready: str, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+    try:
+        response = client.post("/leads", json=VALID_PAYLOAD)
+    finally:
+        get_settings.cache_clear()
+    assert response.status_code == 201
+    body = response.json()
+    lead_id = body["lead_id"]
+
+    with psycopg.connect(schema_ready, autocommit=True) as conn:
+        row = conn.execute(
+            "SELECT score, score_reason, scored_at FROM leads WHERE id = %s",
+            (lead_id,),
+        ).fetchone()
+    assert row is not None
+    assert row[0] == body["score"]
+    assert row[1] == body["score_reason"]
+    assert row[2] is not None
+
+    assert client.get(f"/leads/{lead_id}").json()["score"] == body["score"]
+    assert client.get("/leads").json()["items"][0]["score"] == body["score"]
+
+
+def test_llm_scorer_wins_when_key_set(client, monkeypatch) -> None:
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return _FakeLLMResponse()
+
+    monkeypatch.setattr(scoring.httpx, "post", fake_post)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-dummy-not-real")
+    get_settings.cache_clear()
+    try:
+        response = client.post("/leads", json=VALID_PAYLOAD)
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["score"] == 77
+    assert body["score_reason"] == "LLM says high fit."
+    assert len(calls) == 1
+
+
+def test_no_network_without_key(client, monkeypatch) -> None:
+    calls = []
+
+    def unexpected_post(*args, **kwargs):
+        calls.append(args)
+        return _FakeLLMResponse()
+
+    monkeypatch.setattr(scoring.httpx, "post", unexpected_post)
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+    try:
+        response = client.post("/leads", json=VALID_PAYLOAD)
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 201
+    body = response.json()
+    assert isinstance(body["score"], int)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "message,email,source",
+    [
+        ("x", "a@gmail.com", "newsletter-weekly"),
+        ("a" * 1000, "a@company.example", "referral-program"),
+        (
+            "demo pricing quote trial pilot enterprise integration api urgent purchase " * 3,
+            "a@gmail.com",
+            "social-post",
+        ),
+    ],
+)
+def test_heuristic_stays_within_bounds(
+    client, monkeypatch, message: str, email: str, source: str
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+    try:
+        response = client.post(
+            "/leads",
+            json={
+                **VALID_PAYLOAD,
+                "message": message,
+                "email": email,
+                "source": source,
+                "external_id": "ext-3010",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 201
+    body = response.json()
+    assert isinstance(body["score"], int)
+    assert 0 <= body["score"] <= 100
+    assert 1 <= len(body["score_reason"]) <= 280

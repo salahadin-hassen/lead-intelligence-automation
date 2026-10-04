@@ -237,6 +237,74 @@ rules. Minimum scenarios:
 n8n, CRM, authentication, Docker, background workers/queues, email, Telegram,
 frontend, streaming, token/billing accounting, `PATCH`/`DELETE`, bulk export.
 
+## Milestone 4: Offline Heuristic Scoring
+
+Motivation: no LLM API key is available, so Milestone 3's scoring is always
+dormant. This milestone makes scoring produce real, deterministic scores
+locally — no key, no network, no data leaves the machine.
+
+### Behavior (supersedes M3's "no key → NULL" rule)
+
+```
+POST /leads → persist → scorer:
+    OPENAI_API_KEY set    → LLM scorer (Milestone 3, unchanged)
+    OPENAI_API_KEY absent → heuristic scorer (new, default)
+    → 201 + score fields
+```
+
+- The route's injected scorer becomes this dispatcher; the LLM path keeps its
+  5 s timeout and silent degradation (if the LLM fails while a key is set,
+  the result stays NULL — it does **not** fall back to the heuristic).
+- `score` is always an integer 0–100 with a non-empty human-readable
+  `score_reason`; persisted through the existing `set_lead_score` UPDATE.
+- No schema changes, no new settings, no new libraries.
+
+### Heuristic rules (deterministic; exact weights live in `app/scoring.py`)
+
+Inputs: `message`, `company`, `source`, and the **email domain only**
+(local processing — unlike LLM prompts, nothing is sent anywhere, so the
+domain signal is acceptable; local parts are never stored separately).
+
+| Signal | Direction |
+|---|---|
+| Intent keywords in message (`demo`, `pricing`, `quote`, `trial`, `enterprise`, `integration`, `api`, …), case-insensitive | up per hit, capped |
+| Substantial message (≥ 100 chars) | up |
+| Trivial/short message (< 20 chars) | down |
+| Corporate email domain (not gmail/outlook/yahoo/hotmail/…) | up |
+| Free-mail domain | down |
+| Source weight (`referral`, `contact-form` > `social`, `newsletter`) | ± |
+| Base score | starting midpoint |
+
+Result is clamped to 0–100; `score_reason` summarizes the top contributing
+signals (e.g. `"High-intent keywords (demo, pricing); corporate email domain"`).
+
+### Tests (offline, deterministic — replaces/extends M3 suite)
+
+1. **Amends M3 test:** no key → `POST /leads` → 201 with heuristic
+   `score` (0–100) and non-empty reason instead of `NULL`
+2. High-intent message scores materially higher than junk message (same env)
+3. Corporate email domain scores higher than free-mail domain (same message)
+4. Identical payloads (different `external_id`) → identical score and reason
+5. Heuristic score is persisted (SELECT) and visible in GET/list responses
+6. Key present (stubbed `httpx.post`) → LLM scorer wins; stub not called when
+   key absent
+7. Every payload edge case stays within 0–100 with non-empty reason
+8. Existing M1 + M2 suites green; M3 fake-scorer/409/parser tests unchanged
+
+### Engineering requirements (Milestone 4)
+
+1. Heuristic lives in `app/scoring.py`; routes stay orchestration-only.
+2. Pure function of its inputs — no randomness, no clock, no I/O.
+3. No secrets involved anywhere; nothing printed or logged.
+4. Parameterized SQL only; psycopg stays in `app/db.py` (unchanged).
+5. `score_reason` length bounded (≤ 280 chars) to keep responses tidy.
+
+### Out of scope for Milestone 4
+
+Configurable rule sets/weights, per-source tuning, ML models, prompt
+engineering, LLM fallback chains, n8n, CRM, auth, Docker, workers, email,
+Telegram, frontend, `PATCH`/`DELETE`, bulk export.
+
 ## Out of scope
 
 n8n, CRM, authentication, Docker, background workers, unrelated features.

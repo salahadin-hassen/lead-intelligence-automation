@@ -15,7 +15,7 @@ Scorer = Callable[[LeadCreate], ScoringResult | None]
 
 
 def get_scorer() -> Scorer:
-    return scoring.score_lead
+    return scoring.score
 
 
 router = APIRouter()
