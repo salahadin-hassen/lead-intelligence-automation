@@ -67,6 +67,26 @@ _UPDATE_LEAD_STATUS_SQL = f"""
     RETURNING {_LEAD_COLUMNS}
 """
 
+# Export needs every column, including message/external_id which the JSON API
+# deliberately omits; column order matches the CSV header order.
+_EXPORT_COLUMNS = (
+    "id, name, email, company, message, source, external_id, status, "
+    "score, score_reason, scored_at, created_at"
+)
+
+_EXPORT_LEADS_SQL = f"""
+    SELECT {_EXPORT_COLUMNS}
+    FROM leads
+    WHERE (%(status)s::text IS NULL OR status = %(status)s)
+      AND (%(source)s::text IS NULL OR source = %(source)s)
+    ORDER BY created_at DESC, id DESC
+"""
+
+_DELETE_LEAD_SQL = """
+    DELETE FROM leads
+    WHERE id = %s
+"""
+
 _pool: ConnectionPool | None = None
 
 
@@ -173,3 +193,19 @@ def update_lead_status(lead_id: int, status_value: str) -> dict | None:
                 _UPDATE_LEAD_STATUS_SQL, {"status": status_value, "id": lead_id}
             ).fetchone()
     return dict(row) if row is not None else None
+
+
+def export_leads(status: str | None, source: str | None) -> list[dict]:
+    """Return every matching lead with all columns, newest first."""
+    params = {"status": status, "source": source}
+    with _get_pool().connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(_EXPORT_LEADS_SQL, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_lead(lead_id: int) -> bool:
+    """Delete one lead; True when a row was removed, False when not found."""
+    with _get_pool().connection() as conn:
+        deleted = conn.execute(_DELETE_LEAD_SQL, (lead_id,)).rowcount
+    return deleted > 0

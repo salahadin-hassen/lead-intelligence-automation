@@ -1,7 +1,10 @@
+import csv
+import io
 import logging
 from collections.abc import Callable
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app import db, scoring
 from app.errors import DuplicateLeadError
@@ -40,6 +43,42 @@ def _to_response(row: dict) -> LeadResponse:
         score_reason=row["score_reason"],
         scored_at=row["scored_at"],
     )
+
+
+EXPORT_FILENAME = "leads-export.csv"
+EXPORT_COLUMNS = [
+    "id",
+    "name",
+    "email",
+    "company",
+    "message",
+    "source",
+    "external_id",
+    "status",
+    "score",
+    "score_reason",
+    "scored_at",
+    "created_at",
+]
+_DATETIME_COLUMNS = ("scored_at", "created_at")
+
+
+def _csv_ready_row(row: dict) -> dict:
+    out = dict(row)
+    for key in _DATETIME_COLUMNS:
+        value = out.get(key)
+        if isinstance(value, datetime):
+            out[key] = value.isoformat()
+    return out
+
+
+def _build_csv(rows: list[dict]) -> str:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=EXPORT_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(_csv_ready_row(row))
+    return buffer.getvalue()
 
 
 @router.post("/leads", response_model=LeadResponse, status_code=status.HTTP_201_CREATED)
@@ -98,6 +137,21 @@ def list_leads(
     )
 
 
+# Must be registered before /leads/{lead_id}, otherwise the path parameter
+# would swallow "export" and answer 422.
+@router.get("/leads/export")
+def export_leads(
+    status: str | None = None,
+    source: str | None = None,
+) -> Response:
+    rows = db.export_leads(status=status, source=source)
+    return Response(
+        content=_build_csv(rows),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{EXPORT_FILENAME}"'},
+    )
+
+
 @router.get("/leads/{lead_id}", response_model=LeadResponse)
 def get_lead(lead_id: int) -> LeadResponse:
     row = db.get_lead(lead_id)
@@ -118,3 +172,13 @@ def update_lead_status(lead_id: int, update: LeadStatusUpdate) -> LeadResponse:
             detail="Lead not found",
         )
     return _to_response(row)
+
+
+@router.delete("/leads/{lead_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_lead(lead_id: int) -> Response:
+    if not db.delete_lead(lead_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lead not found",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

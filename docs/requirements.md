@@ -374,6 +374,66 @@ Editing other lead fields (name/email/message), DELETE, transition-graph
 enforcement, bulk/batch updates, audit/history of status changes, n8n, CRM,
 auth, Docker, workers, email, Telegram, frontend.
 
+## Milestone 6: Lead Export & Deletion
+
+Completes the CRUD lifecycle offline: full-fidelity CSV export for analysis
+or CRM handoff, and single-lead deletion. No new libraries (stdlib `csv`),
+no schema changes, no configuration.
+
+### Export — `GET /leads/export?status=…&source=…`
+
+- Response: **200**, `text/csv; charset=utf-8`,
+  `Content-Disposition: attachment; filename="leads-export.csv"`
+- Columns (full row — includes fields the JSON API intentionally omits):
+  `id, name, email, company, message, source, external_id, status, score, score_reason, scored_at, created_at`
+- Header row always present, even for zero results
+- Same filter semantics as `GET /leads` (exact match; unknown value → CSV with
+  header only); same ordering (`created_at DESC, id DESC`); **no pagination** —
+  export is always the full filtered result set
+- Proper CSV escaping via stdlib `csv` (commas, quotes, newlines in `message`
+  must round-trip); timestamps ISO-8601
+- **Route registration order matters:** `/leads/export` must be registered
+  before `/leads/{lead_id}` (a path param would otherwise swallow `export`
+  and return 422). No existing routes are changed.
+
+### Deletion — `DELETE /leads/{lead_id}`
+
+- **204** no content on success | **404** unknown id (generic detail) |
+  **422** non-integer id
+- Parameterized `DELETE … WHERE id = %s` in `app/db.py` (rowcount → bool)
+- After deletion: `GET /leads/{id}` → 404, list total decreases, and the same
+  `(source, external_id)` pair can be created again → 201
+- Double delete → second request **404**
+
+### Implementation shape
+
+1. `app/db.py`: `export_leads(status, source) -> list[dict]` (all columns) and
+   `delete_lead(lead_id) -> bool` — parameterized SQL only
+2. `app/routes/leads.py`: `GET /leads/export` (builds CSV with stdlib
+   `csv`/`io` in the route — presentation concern) and `DELETE /leads/{lead_id}`;
+   export registered first
+3. No changes to models, config, scoring, sql/, conftest, or pyproject
+
+### Tests (Milestone 6, minimum)
+
+1. Empty export → 200, CSV content-type, attachment filename, header-only body
+2. Export contains a created lead with correct values per column (incl. score)
+3. CSV escaping round-trip: `message` with comma, quotes, and newline parses
+   back identically via `csv.reader`
+4. `status`/`source` filters applied (unknown value → header only)
+5. Export ordering is newest first
+6. Delete existing lead → **204**; gone from `GET /leads/{id}` and from list
+7. Delete unknown id → **404**; non-integer id → **422**
+8. Delete twice → second **404**
+9. After delete, same `(source, external_id)` recreates → **201**
+10. Existing M1–M5 suites remain green unchanged
+
+### Out of scope for Milestone 6
+
+JSON export, Excel formats, pagination/streaming for huge exports, bulk
+delete, soft delete/retention, auth on export/delete (still unauthenticated
+like every endpoint), n8n, CRM, Docker, workers, email, Telegram, frontend.
+
 ## Out of scope
 
 n8n, CRM, authentication, Docker, background workers, unrelated features.
