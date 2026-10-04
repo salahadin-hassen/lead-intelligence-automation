@@ -153,6 +153,91 @@ No schema changes. Reuse table `leads` and its existing indexes/constraint.
 AI, n8n, CRM, authentication, Docker, background workers, email, Telegram,
 frontend, write/update/delete endpoints (`PATCH`, `DELETE`), bulk export.
 
+## Milestone 3: AI Lead Scoring
+
+```
+POST /leads → validate → persist → AI scoring (best effort) → 201 + score fields
+```
+
+Scoring is **synchronous and non-blocking for intake**: the lead is always
+created and 201 returned even when AI is unavailable, slow, or misconfigured.
+A duplicate still returns 409 **before** any scoring call (no wasted API call).
+
+### Configuration (pydantic-settings, env / `.env`, never printed)
+
+| Setting | Rules |
+|---|---|
+| `OPENAI_API_KEY` | optional; **absent → scoring skipped**, score stays `NULL` |
+| `OPENAI_BASE_URL` | optional, defaults to the provider's public API |
+| `LEAD_SCORING_MODEL` | optional, default `gpt-4o-mini` |
+
+The key must never be hardcoded, printed, logged, or returned by any endpoint.
+
+### Schema — `sql/002_add_lead_scoring.sql`
+
+```sql
+ALTER TABLE leads
+    ADD COLUMN IF NOT EXISTS score        INTEGER NULL,
+    ADD COLUMN IF NOT EXISTS score_reason TEXT NULL,
+    ADD COLUMN IF NOT EXISTS scored_at    TIMESTAMPTZ NULL;
+ALTER TABLE leads
+    ADD CONSTRAINT leads_score_range
+    CHECK (score IS NULL OR (score >= 0 AND score <= 100));
+```
+
+Schema init and test setup apply all files in `sql/` in sorted order.
+
+### Scoring behavior (isolated in `app/scoring.py`)
+
+- Input to the model: `message`, `company`, `source` only (no name/email —
+  minimize PII in prompts).
+- Expected model reply: strict JSON `{"score": <0-100 int>, "reason": "<text>"}`,
+  parsed with Pydantic. Out-of-range score, bad JSON, timeout (5 s), HTTP
+  error, or missing key → scoring result is `None`.
+- `None` → lead keeps `score = NULL`; API still returns **201**.
+- Successful result is persisted with one parameterized `UPDATE` in `app/db.py`.
+- Database errors still propagate (never swallowed); only AI-layer errors
+  degrade to `NULL`.
+
+### API
+
+`LeadResponse` gains three nullable fields (POST, GET by id, and list):
+
+| Field | Type |
+|---|---|
+| `score` | `int` or `null` (0–100) |
+| `score_reason` | `str` or `null` |
+| `scored_at` | `datetime` or `null` |
+
+### Testing (offline — no API key, no network calls in tests)
+
+The scorer is injected via a FastAPI dependency (`Depends`); tests override it
+with a fake. Database tests keep the existing fail-loud `TEST_DATABASE_URL`
+rules. Minimum scenarios:
+
+1. No `OPENAI_API_KEY` → `POST /leads` → 201, `score: null` (graceful skip)
+2. Fake scorer returns a result → 201 with `score`/`score_reason`/`scored_at`
+3. Score is actually persisted (SELECT) and appears in GET/list responses
+4. Fake scorer raises/timeout → 201, `score: null` (intake never fails)
+5. Duplicate `(source, external_id)` → 409 and the scorer is **never called**
+6. Parser unit tests: invalid JSON / out-of-range score → `None`
+7. Existing M1 + M2 suites remain green unchanged
+
+### Engineering requirements (Milestone 3)
+
+1. Parameterized SQL only; all psycopg code stays in `app/db.py`.
+2. AI/provider code stays in `app/scoring.py`; routes only orchestrate.
+3. Prompts, model name, base URL come from configuration — no secrets in code.
+4. `httpx` moves from the `test` extra to main dependencies (already installed;
+   no new libraries added).
+5. No background workers: single attempt, 5 s timeout, no retries.
+
+### Out of scope for Milestone 3
+
+n8n, CRM, authentication, Docker, background workers/queues, email, Telegram,
+frontend, streaming, token/billing accounting, `PATCH`/`DELETE`, bulk export.
+
 ## Out of scope
 
-AI, n8n, CRM, authentication, Docker, background workers, unrelated features.
+n8n, CRM, authentication, Docker, background workers, unrelated features.
+(AI is in scope via the Milestone 3 spec above.)

@@ -10,12 +10,12 @@ dependencies = [
     "psycopg-pool",
     "pydantic-settings",
     "python-dotenv",
+    "httpx",
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest",
-    "httpx",
 ]
 
 [build-system]

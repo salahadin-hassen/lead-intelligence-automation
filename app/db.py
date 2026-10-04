@@ -5,6 +5,7 @@ route only sees application-level results and errors (e.g.
 :class:`app.errors.DuplicateLeadError`).
 """
 
+from datetime import datetime
 from pathlib import Path
 
 import psycopg
@@ -14,7 +15,7 @@ from psycopg_pool import ConnectionPool
 from app.errors import DuplicateLeadError
 from app.models import LeadCreate
 
-SCHEMA_PATH = Path(__file__).resolve().parent.parent / "sql" / "001_create_leads.sql"
+SCHEMA_DIR = Path(__file__).resolve().parent.parent / "sql"
 
 _INSERT_LEAD_SQL = """
     INSERT INTO leads (name, email, company, message, source, external_id)
@@ -22,7 +23,9 @@ _INSERT_LEAD_SQL = """
     RETURNING id, status, created_at
 """
 
-_LEAD_COLUMNS = "id, name, email, company, source, status, created_at"
+_LEAD_COLUMNS = (
+    "id, name, email, company, source, status, created_at, score, score_reason, scored_at"
+)
 
 # NULL filters are handled in SQL with (%(x)s::text IS NULL OR col = %(x)s) so
 # the query text is static and user values are only ever bound parameters.
@@ -48,6 +51,13 @@ _GET_LEAD_SQL = f"""
     SELECT {_LEAD_COLUMNS}
     FROM leads
     WHERE id = %s
+"""
+
+_SET_LEAD_SCORE_SQL = """
+    UPDATE leads
+    SET score = %s, score_reason = %s, scored_at = CURRENT_TIMESTAMP
+    WHERE id = %s
+    RETURNING scored_at
 """
 
 _pool: ConnectionPool | None = None
@@ -76,10 +86,10 @@ def _get_pool() -> ConnectionPool:
 
 
 def init_schema() -> None:
-    """Apply the SQL schema/init file (idempotent)."""
-    schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
+    """Apply every SQL file in sql/ (sorted order, idempotent)."""
     with _get_pool().connection() as conn:
-        conn.execute(schema_sql)
+        for path in sorted(SCHEMA_DIR.glob("*.sql")):
+            conn.execute(path.read_text(encoding="utf-8"))
 
 
 def create_lead(lead: LeadCreate) -> dict:
@@ -129,3 +139,17 @@ def get_lead(lead_id: int) -> dict | None:
         with conn.cursor(row_factory=dict_row) as cur:
             row = cur.execute(_GET_LEAD_SQL, (lead_id,)).fetchone()
     return dict(row) if row is not None else None
+
+
+def set_lead_score(lead_id: int, score: int, score_reason: str) -> datetime:
+    """Persist a scoring result for a lead and return the scored_at timestamp.
+
+    Raises:
+        RuntimeError: if the UPDATE matched no row (lead disappeared).
+    """
+    with _get_pool().connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(_SET_LEAD_SCORE_SQL, (score, score_reason, lead_id)).fetchone()
+    if row is None:
+        raise RuntimeError("UPDATE leads ... RETURNING scored_at returned no row")
+    return row["scored_at"]

@@ -12,7 +12,7 @@ import pytest
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SQL_PATH = PROJECT_ROOT / "sql" / "001_create_leads.sql"
+SQL_DIR = PROJECT_ROOT / "sql"
 
 # Allow TEST_DATABASE_URL from .env without overriding a real environment
 # variable. .env itself is never printed.
@@ -41,7 +41,8 @@ def schema_ready(test_database_url: str) -> str:
     try:
         with psycopg.connect(test_database_url, autocommit=True) as conn:
             conn.execute("DROP TABLE IF EXISTS leads;")
-            conn.execute(SQL_PATH.read_text(encoding="utf-8"))
+            for path in sorted(SQL_DIR.glob("*.sql")):
+                conn.execute(path.read_text(encoding="utf-8"))
     except psycopg.Error as exc:
         raise RuntimeError(
             "The test PostgreSQL database is unavailable or the schema could not "

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 REQUIRED_NON_EMPTY_FIELDS = ("name", "company", "message", "source")
 
@@ -30,6 +30,9 @@ class LeadResponse(BaseModel):
     source: str
     status: str
     created_at: datetime
+    score: int | None = None
+    score_reason: str | None = None
+    scored_at: datetime | None = None
 
 
 class LeadListResponse(BaseModel):
@@ -37,3 +40,10 @@ class LeadListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class ScoringResult(BaseModel):
+    """Strict shape expected from the lead-scoring model reply."""
+
+    score: int = Field(ge=0, le=100)
+    reason: str = Field(min_length=1)
