@@ -27,8 +27,9 @@ missing.
   reachable, `503` otherwise.
 - **n8n intake workflow** — importable webhook → `POST /leads` → response
   workflow that forwards FastAPI's real status instead of fabricating success,
-  then routes created leads (qualified / not-qualified / manual review) by the
-  score FastAPI returned.
+  routes created leads (qualified / not-qualified / manual review) by the
+  score FastAPI returned, and records each decision as a structured
+  operational event with a human-readable summary in the execution data.
 
 ## Architecture
 
@@ -49,7 +50,7 @@ route (orchestration only)
 | `app/models.py` | Pydantic request/response models |
 | `app/config.py` | Settings from environment / `.env` |
 | `sql/` | Idempotent migrations, auto-applied at startup |
-| `n8n/lead-intake.json` | Importable n8n workflow — orchestration and qualification routing only; validation, scoring and SQL stay in FastAPI |
+| `n8n/lead-intake.json` | Importable n8n workflow — orchestration, qualification routing and operational/audit records only; validation, scoring and SQL stay in FastAPI |
 
 Rules the code enforces: SQL never leaves `app/db.py`, provider code never
 leaves `app/scoring.py`, and PostgreSQL-specific errors never reach a route.
@@ -200,10 +201,12 @@ Webhook (POST /webhook/lead-intake)
   → HTTP Request           POST {base}/leads (JSON, 10 s, no retries)
   → Switch on statusCode   201 | 409 | 422 | fallback
       ├ 201 ─┬ Respond Created (201) ────────────► caller, envelope unchanged
+      │       │   (executes first, so operational failures can't fake a 5xx)
       │       └ Extract → Qualification → Route on Qualification
       │            ├ qualified     → Log Priority Route  (priority "high")
       │            ├ not_qualified → Log Normal Route    (priority "normal")
       │            └ manual_review → Log Manual Review   (score stays null)
+      │                        └──► Build Audit Event    unified event
       ├ 409 → Respond Duplicate · 422 → Respond Validation Failed
       └ other → Respond Upstream Error (502)
 ```
@@ -225,11 +228,20 @@ Webhook (POST /webhook/lead-intake)
   (`created`/201, `duplicate`/409, `validation_failed`/422, `upstream_error`/502
   when the API could not be reached, `apiStatus: null` when no response arrived
   at all).
-- **Routing actions = structured records in n8n's execution data.** No
-  email/Slack/Telegram/CRM exists in this environment, so each branch emits
-  its record (`action`, `leadId`, `company`, `score`, `qualification`,
-  `priority`, …) as the terminal node's output, persisted and inspectable in
-  the execution view — no credentials, no third-party accounts.
+- **Operational records, not fake notifications.** No email/Slack/Telegram/CRM
+  exists in this environment, so each branch emits its record (`event`:
+  `lead_qualified`/`lead_not_qualified`/`lead_manual_review`, lead data,
+  `reason`, threshold provenance) plus a human-readable `summary` as the
+  node's output, and `Build Audit Event` merges it into one audit event
+  (`timestamp`, `executionId`, `executionMode`) — persisted and inspectable
+  in the execution view, no credentials, no third-party accounts, nothing
+  delivered anywhere.
+- **Intake answers never depend on the operational chain.** n8n 2.x orders
+  sibling nodes by canvas position (top-most first), so `Respond Created`
+  sits above the first operational node and replies before qualification or
+  audit code runs; a failing operational node shows up as a `status: error`
+  execution while the caller keeps its real `201` (verified by fault
+  injection).
 - **Configuration:** `LEAD_API_BASE_URL` + `LEAD_QUALIFIED_THRESHOLD` in the
   n8n process environment — note that **n8n 2.x blocks `$env` by default**, so
   also set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (otherwise the workflow falls
@@ -248,11 +260,13 @@ curl -X POST localhost:5678/webhook/lead-intake -H 'Content-Type: application/js
 ```
 
 **Validated against a live n8n 2.41.7 instance** — intake codes
-(created/duplicate/invalid/unreachable/upstream-500) and all three
+(created/duplicate/invalid/unreachable/upstream-500), all three
 qualification branches (qualified / not-qualified / unscored→manual review,
-plus a `LEAD_QUALIFIED_THRESHOLD` flip run) executed live with branch
-outcomes read from n8n's persisted execution data, plus `pytest` (83 passing).
-Details and the exact scenario tables:
+plus a `LEAD_QUALIFIED_THRESHOLD` flip run), the operational records and
+audit event, and three failure-isolation runs (operational node throwing →
+caller still gets `201`, execution records the error, lead row accepted)
+executed live with outcomes read from n8n's persisted execution data, plus
+`pytest` (83 passing). Details and the exact scenario tables:
 [`docs/n8n-integration.md`](docs/n8n-integration.md).
 
 ## Configuration
@@ -308,7 +322,7 @@ app/
   config.py          settings
   errors.py          application-level exceptions
 sql/                 001–004 idempotent migrations
-n8n/lead-intake.json importable webhook → POST /leads → qualification routing
+n8n/lead-intake.json importable webhook → POST /leads → routing + audit records
 tests/               83 integration + unit tests
 docs/requirements.md source of truth for project scope
 docs/n8n-integration.md  the n8n contract and operating guide
@@ -330,8 +344,8 @@ docs/n8n-integration.md  the n8n contract and operating guide
 **In scope today:** intake, retrieval, scoring, status workflow, export,
 deletion, health — as specified in [`docs/requirements.md`](docs/requirements.md)
 (Milestones 1–6), plus a hardening pass (indexes, health probe, docs), the
-n8n intake workflow (Milestone 7) and its qualification routing
-(Milestone 8).
+n8n intake workflow (Milestone 7), its qualification routing (Milestone 8)
+and the operational/audit layer (Milestone 9).
 
 **Deliberately out of scope:** authentication, rate limiting, Docker, CRM,
 background workers, frontend, email/Telegram, status transition-graph

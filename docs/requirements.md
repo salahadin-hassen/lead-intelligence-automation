@@ -561,12 +561,14 @@ Route on API Status ── 201 ──┬─► Respond Created            (Miles
 (409 / 422 / fallback branches of Route on API Status are untouched)
 ```
 
-**Notification:** this environment has no email/Slack/Telegram/CRM, so each
-terminal node performs its action by emitting one structured record
-(`action`, `leadId`, `company`, `source`, `score`, `qualification`,
-`priority`, `qualifiedThreshold`, plus `note` on manual review) **as its node
-output**, persisted in n8n's execution data — workflow-native, inspectable,
-no credentials or third-party accounts.
+**Notification (as built in M8):** this environment has no
+email/Slack/Telegram/CRM, so each terminal node performs its action by
+emitting one structured record (`action`, `leadId`, `company`, `source`,
+`score`, `qualification`, `priority`, `qualifiedThreshold`, plus `note` on
+manual review) **as its node output**, persisted in n8n's execution data —
+workflow-native, inspectable, no credentials or third-party accounts.
+*(Milestone 9 supersedes this shape: `action`/`note` became `event`/`reason`
+plus a `summary` string and the unified audit event — see below.)*
 
 ### Tests / validation (Milestone 8)
 
@@ -599,8 +601,83 @@ authentication, rate limiting, Docker, additional workflows, and **any change
 to FastAPI** (no contract gap was found: `score` is already `int | None` and
 the response already carries every field the routing needs).
 
+## Milestone 9: Operational Lead-Alert & Audit Layer
+
+The qualification decision becomes an operational record an operator can act
+on and audit — without third-party credentials and without new
+infrastructure. FastAPI keeps validation, persistence, duplicate detection
+**and scoring**; n8n keeps orchestration and qualification and now also the
+operational action layer. Full reference:
+[`docs/n8n-integration.md`](n8n-integration.md).
+
+### Design (entirely inside n8n's execution data)
+
+```
+Route on Qualification ──┬─ qualified     ─► Log Priority Route  ─┐
+                         ├─ not_qualified ─► Log Normal Route     ─┤ operational
+                         ├─ manual_review ─► Log Manual Review    ─┤ records
+                         └─ (fallback)    ─► Log Manual Review    ─┘
+                                                 ▼
+                                          Build Audit Event   (terminal)
+```
+
+- **One structured record per branch, identical keys everywhere:** `event`
+  (`lead_qualified` / `lead_not_qualified` / `lead_manual_review`), `leadId`,
+  `company`, `source`, `score` (`null` stays `null` — never fabricated),
+  `scoreReason`, `qualification`, `priority`, `reason`, `qualifiedThreshold`,
+  `thresholdSource`, plus a human-readable **`summary` string on the same
+  output JSON** — the n8n-native representation that survives into persisted
+  execution data (static node "notes" cannot carry per-lead values and
+  `console.log` is not persisted without `CODE_ENABLE_STDOUT=true`).
+- **Unified audit event** in `Build Audit Event`: `timestamp`
+  (`$now.toISO()`), `executionId`, `executionMode`, plus the branch record
+  unchanged — one structured event per executed lead, deliberately shaped to
+  feed a later email/Slack/Telegram/CRM/analytics consumer. No database
+  table, no FastAPI endpoint, no queue.
+- **Caller-response isolation, measured rather than assumed:** n8n 2.x
+  `executionOrder: v1` orders sibling nodes by canvas position (top-most
+  runs first), which meant `Respond Created` actually ran *last* — so a
+  failing operational node returned a fake `500` to the caller even though
+  FastAPI had stored the lead (reproduced live, then fixed). Moving
+  `Respond Created` above the first operational node makes the caller get
+  the genuine `201` first; the failure stays visible as a `status: error`
+  execution. Connection lists remain byte-identical to Milestone 7.
+- Records are **workflow-native operational records, not external
+  notifications**: no email/Slack/Telegram/CRM integration exists in this
+  environment and none is faked or claimed.
+
+### Tests / validation (Milestone 9)
+
+1. Existing suites stay green (**83 tests**) — no backend change was needed
+   (the `LeadResponse` contract already carries every field the records use).
+2. Structural validation of the workflow JSON (15 unique nodes,
+   reachability, only the intended terminals, every M7/M8 node and
+   connection byte-identical to `HEAD` except the three rewritten branch
+   records and `Respond Created`'s position, the respond-above-extract
+   execution-order invariant, single config source, no SQL/scoring
+   logic/secrets/paths, `typeVersion`s present in the installed sources).
+3. **Live n8n execution, run personally** against n8n 2.41.7: qualified,
+   not-qualified, unscored (bogus `OPENAI_API_KEY` + dead base URL),
+   duplicate, validation failure, FastAPI down, threshold flip (the same
+   score-75 lead qualified at 70 and became `not_qualified` at 95),
+   boundary score, and a clean run — plus **three fault-injection runs**:
+   pre-M9 ordering (caller received a fake `500` while the row was stored),
+   early operational node with the fix (caller `201`, execution
+   `status=error`, row accepted), and the new audit node failing (caller
+   `201`, branch record still persisted, failure visible). Scenario table:
+   [`docs/n8n-integration.md`](n8n-integration.md).
+
+### Out of scope for Milestone 9
+
+Any external delivery of the records (email/Slack/Telegram/CRM — none exists
+in this environment and none is faked or claimed), persisting audit events
+(no table, no endpoint, no queue — the event lives in n8n's execution data
+on purpose), altering FastAPI (no contract gap: the webhook/lead contract
+already carries every field the records need), plus everything excluded in
+the preceding milestones.
+
 ## Out of scope
 
-n8n beyond the single lead-intake workflow of Milestones 7–8, CRM,
+n8n beyond the single lead-intake workflow of Milestones 7–9, CRM,
 authentication, Docker, background workers, unrelated features.
 (AI is in scope via the Milestone 3 spec above.)

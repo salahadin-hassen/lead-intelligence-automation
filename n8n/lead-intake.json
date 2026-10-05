@@ -172,7 +172,7 @@
       "typeVersion": 1.5,
       "position": [
         960,
-        -240
+        -720
       ]
     },
     {
@@ -345,7 +345,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Priority routing notification for a qualified lead (Milestone 8).\n// Delivery mechanism: the record below is this node's output, persisted in\n// n8n's execution data and shown in the execution view. This environment\n// has no email/Slack/Telegram/SMTP/CRM integration, so nothing is sent\n// elsewhere and no credentials or third-party accounts are used.\nconst lead = $input.first().json;\n\nreturn [{\n  json: {\n    action: 'priority_route',\n    leadId: lead.leadId,\n    company: lead.company,\n    source: lead.source,\n    score: lead.score,\n    qualification: lead.qualification,\n    priority: lead.priority,\n    qualifiedThreshold: lead.qualifiedThreshold,\n  },\n}];"
+        "jsCode": "// Priority-branch operational record (Milestone 9) for a qualified lead.\n// The record below IS this node's output: n8n persists it in the execution\n// data, where an operator can inspect it in the execution view. It is a\n// workflow-native operational record, NOT an external notification - this\n// environment has no email/Slack/Telegram/CRM integration and none is\n// faked here. `event` names the operational action for downstream\n// consumers; `summary` is the human-readable rendering of the same values.\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'lead_qualified',\n  leadId: lead.leadId ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'qualified',\n  priority: lead.priority ?? null,\n  reason: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'HIGH PRIORITY LEAD',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000012",
       "name": "Log Priority Route",
@@ -359,7 +359,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Normal routing notification for a lead below the qualification\n// threshold (Milestone 8). Same delivery mechanism as the priority route:\n// the record is this node's output, persisted in n8n's execution data.\nconst lead = $input.first().json;\n\nreturn [{\n  json: {\n    action: 'normal_route',\n    leadId: lead.leadId,\n    company: lead.company,\n    source: lead.source,\n    score: lead.score,\n    qualification: lead.qualification,\n    priority: lead.priority,\n    qualifiedThreshold: lead.qualifiedThreshold,\n  },\n}];"
+        "jsCode": "// Not-qualified branch operational record (Milestone 9): the score is\n// below the configured threshold. Same delivery mechanism as the priority\n// branch - the record is this node's output, persisted in n8n's execution\n// data. Workflow-native record, not an external notification.\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'lead_not_qualified',\n  leadId: lead.leadId ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'not_qualified',\n  priority: lead.priority ?? null,\n  reason: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'NOT QUALIFIED',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000013",
       "name": "Log Normal Route",
@@ -373,7 +373,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Manual review routing notification: FastAPI could not score the lead\n// (score null) or the qualification state could not be determined\n// (Milestone 8). The score is reported as null - never replaced with 0 or\n// any guess. Same delivery mechanism as the other routes: this node's\n// output, persisted in n8n's execution data.\nconst lead = $input.first().json;\nconst score = (typeof lead.score === 'number' && Number.isFinite(lead.score))\n  ? lead.score\n  : null;\n\nreturn [{\n  json: {\n    action: 'manual_review',\n    leadId: lead.leadId,\n    company: lead.company,\n    source: lead.source,\n    score,\n    qualification: lead.qualification || 'manual_review',\n    priority: lead.priority ?? null,\n    note: score === null\n      ? 'scoring unavailable - manual review required'\n      : 'qualification could not be determined - manual review required',\n    qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  },\n}];"
+        "jsCode": "// Manual-review branch operational record (Milestone 9): FastAPI could\n// not score the lead (score stays null) or the qualification state could\n// not be determined. The score is never replaced with 0 or a guess.\n// Same delivery mechanism as the other branches - the record is this\n// node's output, persisted in n8n's execution data. Workflow-native\n// record, not an external notification.\nconst lead = $input.first().json || {};\nconst score = (typeof lead.score === 'number' && Number.isFinite(lead.score))\n  ? lead.score\n  : null;\nconst reason = score === null\n  ? 'scoring unavailable'\n  : 'qualification could not be determined';\n\nconst record = {\n  event: 'lead_manual_review',\n  leadId: lead.leadId ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification || 'manual_review',\n  priority: lead.priority ?? null,\n  reason,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'MANUAL REVIEW REQUIRED',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n  `Reason: ${record.reason}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000014",
       "name": "Log Manual Review",
@@ -382,6 +382,20 @@
       "position": [
         1680,
         -400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Unified operational audit event (Milestone 9): one downstream event\n// representation per processed lead - execution context (when it ran, which\n// execution) merged with the branch record that reached this node. The\n// event stays entirely inside n8n's execution data: no database table, no\n// FastAPI endpoint, no external channel. It is the hand-off point a future\n// consumer (email, Slack, Telegram, CRM, analytics) would attach to, so the\n// payload stays structured instead of being flattened into one string.\nconst record = $input.first().json || {};\n\nreturn [{\n  json: {\n    timestamp: $now.toISO(),\n    executionId: $execution.id,\n    executionMode: $execution.mode,\n    ...record,\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000015",
+      "name": "Build Audit Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -480
       ]
     }
   ],
@@ -504,6 +518,39 @@
         [
           {
             "node": "Log Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Priority Route": {
+      "main": [
+        [
+          {
+            "node": "Build Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Normal Route": {
+      "main": [
+        [
+          {
+            "node": "Build Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Manual Review": {
+      "main": [
+        [
+          {
+            "node": "Build Audit Event",
             "type": "main",
             "index": 0
           }

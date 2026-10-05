@@ -1,11 +1,13 @@
-# n8n ↔ FastAPI integration (Milestones 7 + 8)
+# n8n ↔ FastAPI integration (Milestones 7–9)
 
 This document describes the automation boundary between **n8n** and the
 FastAPI lead API: one importable workflow, `n8n/lead-intake.json`, that accepts
 an external lead over a webhook, forwards it to `POST /leads`, returns the
-*real* downstream result to the caller (Milestone 7), and — only for leads
-FastAPI actually created — turns FastAPI's score into a deterministic
-qualification decision with visibly divergent routing actions (Milestone 8).
+*real* downstream result to the caller (Milestone 7), turns FastAPI's score
+into a deterministic qualification decision with visibly divergent routing
+actions (Milestone 8), and — only for leads FastAPI actually created —
+records each decision as a structured operational event an operator can
+inspect in the execution data (Milestone 9).
 
 n8n orchestrates. FastAPI decides. Nothing about validation, persistence,
 duplicate detection or scoring is duplicated in n8n: the workflow *reads* the
@@ -28,16 +30,21 @@ External lead source
   Route on API Status     (switch on statusCode: 201 · 409 · 422 · fallback)
         │
         ├─ 201 ──┬─► Respond Created ─────────────────► caller gets the envelope
+        │        │     (executes FIRST — see Caller-response isolation)
         │        └─► Extract Lead + Score   normalize LeadResponse (leadId,
         │                  │                 company, source, score …)
         │                  ▼
         │           Qualification          score vs threshold → label
         │                  ▼
         │           Route on Qualification (switch on `qualification`)
-        │             ├─ qualified     ─► Log Priority Route
-        │             ├─ not_qualified ─► Log Normal Route
-        │             ├─ manual_review ─► Log Manual Review
-        │             └─ (fallback)    ─► Log Manual Review
+        │             ├─ qualified     ─► Log Priority Route   ─┐
+        │             ├─ not_qualified ─► Log Normal Route      ─┤ operational
+        │             ├─ manual_review ─► Log Manual Review     ─┤ records
+        │             └─ (fallback)    ─► Log Manual Review     ─┘
+        │                                        ▼
+        │                              Build Audit Event    unified event
+        │                                        ▼
+        │                              (terminal, in execution data)
         ├─ 409 ───► Respond Duplicate
         ├─ 422 ───► Respond Validation Failed
         └─ other ──► Respond Upstream Error
@@ -47,10 +54,12 @@ External lead source
 
 The 201 branch **fans out**: `Respond Created` answers the caller exactly as
 in Milestone 7 (the webhook envelope is byte-identical), while
-`Extract Lead + Score → Qualification → …` runs independently. A defect in
-the qualification chain can therefore never change or delay the caller's
-answer, and the qualification chain does not depend on execution continuing
-past a `respondToWebhook` node.
+`Extract Lead + Score → Qualification → … → Build Audit Event` runs
+independently. A defect anywhere in the operational chain can therefore
+neither change nor delay the caller's answer — but only because
+`Respond Created` *executes first*, which is arranged by its canvas position
+(see Caller-response isolation); the branch does not depend on execution
+continuing past a `respondToWebhook` node.
 
 | Node | Responsibility |
 |---|---|
@@ -62,7 +71,8 @@ past a `respondToWebhook` node.
 | `Extract Lead + Score` | Reads the 201 body of `Create Lead in FastAPI` and normalizes it into the routing base result (`leadId`, `company`, `source`, `score`, `scoreReason`). The score is copied, not interpreted: anything FastAPI did not return as a finite number stays `null` (never `0`, never a guess). |
 | `Qualification` | **The one place the threshold rule is applied** (see Qualification rule). Labels the lead `qualified` / `not_qualified` / `manual_review` and attaches `priority` (`high` / `normal` / `null`). Reads the threshold from `Prepare Lead Payload` — it does not define or repeat it. |
 | `Route on Qualification` | Switch (string equality on `qualification`) with a defensive fallback output; the fallback — a state the decision node should never emit — is wired to `Log Manual Review`, so an unknown state goes to a human instead of being dropped. |
-| `Log Priority Route` / `Log Normal Route` / `Log Manual Review` | Terminal notification nodes; each emits one structured record as its node output, which n8n persists in the execution data (see Notification). |
+| `Log Priority Route` / `Log Normal Route` / `Log Manual Review` | The three operational branches. Each emits its **operational record** (`event`, lead data, `reason`, threshold provenance) *plus a human-readable `summary`* as its node output, which n8n persists in the execution data (see Operational actions & audit event). |
+| `Build Audit Event` | Terminal merge of whichever branch ran: adds `timestamp` (n8n's `$now`), `executionId` and `executionMode` to the record, producing the **unified audit event** — the structured hand-off point a future channel (email, Slack, CRM, analytics) would consume. |
 
 ## Configuration
 
@@ -252,23 +262,123 @@ pipeline data is available. It is tuned by editing `DEFAULT_QUALIFIED_THRESHOLD`
 in the config block or setting `LEAD_QUALIFIED_THRESHOLD` (single source,
 see Configuration).
 
-## Notification (routing actions)
+## Operational actions & audit event (Milestone 9)
 
-There is no email/Slack/Telegram/CRM integration in this environment and none
-was invented for this milestone. Each terminal node therefore performs its
-routing action by **emitting one structured record as its node output**, which
-n8n persists in the execution data (and displays in the execution view) — a
-workflow-native, inspectable delivery mechanism requiring no credentials or
-third-party accounts:
+Each qualification branch performs its operational action by **emitting a
+structured record as its node output**; the three records then merge into one
+unified audit event. Everything stays inside n8n's execution data — no
+database table, no FastAPI endpoint, no queue.
 
-| Terminal node | Record |
+> **These are workflow-native operational records, not external
+> notifications.** No email, chat message or webhook delivery happens: this
+> environment contains no email/Slack/Telegram/CRM integration and none was
+> invented. Nothing is "sent" anywhere — the records exist to be inspected in
+> the execution view (or n8n's database) and to define the payload a real
+> channel would consume later. They are therefore never described as emails,
+> alerts or "notifications delivered".
+
+### Record shape
+
+Every branch emits the same keys, so a consumer never has to branch on shape:
+
+| Key | Meaning |
 |---|---|
-| `Log Priority Route` | `{"action": "priority_route", "leadId", "company", "source", "score", "qualification": "qualified", "priority": "high", "qualifiedThreshold"}` |
-| `Log Normal Route` | `{"action": "normal_route", "leadId", "company", "source", "score", "qualification": "not_qualified", "priority": "normal", "qualifiedThreshold"}` |
-| `Log Manual Review` | `{"action": "manual_review", "leadId", "company", "source", "score": null, "qualification": "manual_review", "priority": null, "note": "scoring unavailable - manual review required", "qualifiedThreshold"}` |
+| `event` | `lead_qualified` · `lead_not_qualified` · `lead_manual_review` — the operational action type |
+| `leadId`, `company`, `source` | copied from FastAPI's 201 body, never re-derived |
+| `score` | FastAPI's score; `null` when it could not score — never fabricated |
+| `scoreReason` | FastAPI's `score_reason` sentence (the audit "why") |
+| `qualification`, `priority` | the decision computed by `Qualification` (Milestone 8) |
+| `reason` | `null` for qualified/not-qualified; `scoring unavailable` or `qualification could not be determined` for manual review |
+| `qualifiedThreshold`, `thresholdSource` | which threshold was applied and where it came from |
+| `summary` | human-readable rendering of the same values |
 
-When a real notification channel (email, chat, CRM webhook) is added later,
-it attaches to these three nodes — the record shape above is the payload.
+Example — the `Log Priority Route` output of a qualified lead:
+
+```json
+{
+  "event": "lead_qualified",
+  "leadId": 123,
+  "company": "Example Corp",
+  "source": "website",
+  "score": 95,
+  "scoreReason": "High-intent keywords (demo, pricing); corporate email domain",
+  "qualification": "qualified",
+  "priority": "high",
+  "reason": null,
+  "qualifiedThreshold": 70,
+  "thresholdSource": "workflow-default (n8n blocks $env access)",
+  "summary": "HIGH PRIORITY LEAD\nCompany: Example Corp\nLead ID: 123\nScore: 95\nSource: website\nQualification: qualified"
+}
+```
+
+### The three actions
+
+| Branch | Terminal node | `event` | `priority` | `summary` header |
+|---|---|---|---|---|
+| `score >= threshold` | `Log Priority Route` | `lead_qualified` | `high` | `HIGH PRIORITY LEAD` |
+| `score < threshold` | `Log Normal Route` | `lead_not_qualified` | `normal` | `NOT QUALIFIED` |
+| score `null`, unusable threshold, or the switch's defensive fallback | `Log Manual Review` | `lead_manual_review` | `null` | `MANUAL REVIEW REQUIRED`, plus a `Reason:` line |
+
+The human-readable form is a `summary` **string field on the same output
+JSON** — the n8n-native mechanism that survives into persisted execution data
+and shows up in the execution view. Static node "notes" cannot carry
+per-lead values, and `console.log` output is not persisted without
+`CODE_ENABLE_STDOUT=true`, so neither is used:
+
+```
+MANUAL REVIEW REQUIRED
+Company: Example Corp
+Lead ID: 125
+Score: null
+Source: website
+Qualification: manual_review
+Reason: scoring unavailable
+```
+
+### The audit event
+
+`Build Audit Event` runs after whichever branch fired and adds execution
+context, producing **one unified downstream event per executed lead**:
+
+| Key | Example / meaning |
+|---|---|
+| `timestamp` | `2026-10-05T10:54:07.425-04:00` — n8n's `$now.toISO()` |
+| `executionId` | `"39"` — `$execution.id` |
+| `executionMode` | `production` for webhook runs (`test` for manual editor runs) |
+| … | the complete branch record above, unchanged |
+
+Structured rather than flattened into one string, it is the hand-off point a
+future consumer (email, Slack, Telegram, CRM, analytics) would attach to —
+after `Build Audit Event` for a single stream, or after a specific branch
+when a channel only wants one class of lead. Milestone 9 deliberately
+implements none of those channels and adds no storage for the event.
+
+### Caller-response isolation
+
+The webhook answer must never depend on the operational chain. The mechanism
+below was **measured, not assumed**:
+
+- **n8n 2.x `executionOrder: v1` orders sibling nodes by canvas position.**
+  After a node runs, its destination nodes are sorted by `position[1]`
+  descending (bottom-most first) and each is `unshift`ed onto the execution
+  stack — so the **top-most sibling executes first**, and the order of entries
+  in the connection array is irrelevant.
+- In Milestones 7/8 `Respond Created` sat *below* `Extract Lead + Score`
+  (`[960,-240]` vs `[960,-480]`) and therefore ran **last** — the opposite of
+  what this document previously claimed. Milestone 9 moves `Respond Created`
+  to `[960,-720]` (above the first operational node) so the caller is
+  answered **before** any qualification, branch or audit node runs. The
+  connection list itself stays byte-identical to Milestone 7.
+- Consequence: an operational failure surfaces as a **failed execution
+  (`status: error`) with the error message persisted in the execution data** —
+  visible, not swallowed — while the caller keeps the genuine `201`. No
+  operational node sets `onError: continue*`, so failures are never muted.
+
+Fault-injection evidence (Verification, cases 10–12): with the old position a
+throwing `Extract Lead + Score` made the caller receive
+`500 {"message":"Error in workflow"}` although FastAPI had already stored the
+row; with the M9 position the same fault returns `201`, the execution is
+`status=error` with the injected message recorded, and the lead row exists.
 
 ## Importing and activating
 
@@ -312,16 +422,66 @@ Two n8n 2.x port facts worth knowing (both hit while testing this workflow):
 
 ## Scope
 
-In scope: this single intake workflow (intake + qualification routing) and the
-boundary it defines.
+In scope: this single intake workflow (intake + qualification routing +
+operational/audit records) and the boundary it defines.
 
-Out of scope for these milestones (later work): delivering notifications
-anywhere outside n8n's own execution data (email/Telegram/Slack/CRM — the
-routing records are ready to be consumed by such a channel later), enrichment,
-scheduled follow-ups, retries and queues, authentication, rate limiting,
-Docker, additional workflows.
+Out of scope for these milestones (later work): delivering the operational
+records anywhere outside n8n's own execution data (email/Telegram/Slack/CRM —
+the records are the payload such a channel would consume), persisting the
+audit event (no table, no endpoint — that is deliberate for Milestone 9),
+enrichment, scheduled follow-ups, retries and queues, authentication, rate
+limiting, Docker, additional workflows.
 
 ## Verification
+
+### Milestone 9 — run personally against a live n8n instance
+
+Environment: n8n `2.41.7` under `/tmp`, workflow re-imported with
+`n8n import:workflow` + `n8n publish:workflow --id=lead-intake` and the
+service restarted between variants, FastAPI (uvicorn, PostgreSQL 16 test
+database) run either in heuristic mode or — for case 3 — with a bogus
+`OPENAI_API_KEY` and a dead `OPENAI_BASE_URL`. Executed-node lists, node
+start order, records and errors were read from n8n's persisted execution
+data (`execution_data`), i.e. the same artifact an operator inspects, never
+from the webhook response (which does not carry the routing result).
+
+| # | Scenario | Expected | Observed |
+|---|---|---|---|
+| 1 | qualified lead (intent keywords + corporate domain → score 95), default threshold 70 | `201`, `qualified`/`high`, record + summary, audit event | exec 27: `event:"lead_qualified"`, `priority:"high"`, `summary:"HIGH PRIORITY LEAD\nCompany: Navy Yard Corp\nLead ID: 3\nScore: 95\n…"`, audit `timestamp:"2026-10-05T10:42:09…"`, `executionId:"27"`, `executionMode:"production"` |
+| 2 | not-qualified lead (free-mail + newsletter + one-word message → score 12) | `201`, `not_qualified`/`normal` | exec 28: `event:"lead_not_qualified"`, `priority:"normal"`, `summary:"NOT QUALIFIED\n…"` |
+| 3 | unscored lead: FastAPI restarted with bogus `OPENAI_API_KEY` + dead `OPENAI_BASE_URL` → M4 rule returns `score: null` | `201` with `score: null`, `manual_review`, no fabricated score | exec 32: `"score":null`, `event:"lead_manual_review"`, `priority:null`, `reason:"scoring unavailable"`, `summary:"MANUAL REVIEW REQUIRED\n…\nScore: null\n…\nReason: scoring unavailable"` |
+| 4 | duplicate `(source, external_id)` | `409`, **no** operational node runs | exec 29: `409`, nodes = …`Respond Duplicate` only |
+| 5 | payload missing `email` | `422`, **no** operational node runs | exec 30: `422`, `Respond Validation Failed` only |
+| 6 | FastAPI process stopped | `502` (`apiStatus: null`), no qualified/not-qualified event | exec 31: `502`, `Respond Upstream Error` only |
+| 7 | threshold flip: n8n restarted with `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` + `LEAD_QUALIFIED_THRESHOLD=95`, **same score-75 payload** as case 8 | `not_qualified` (75 < 95), `thresholdSource: "environment"` | exec 34: `qualification:"not_qualified"`, `qualifiedThreshold:95`, `thresholdSource:"environment"`, `event:"lead_not_qualified"` |
+| 8 | boundary lead at default threshold (score 75 ≥ 70) | `qualified` | exec 33: `Log Priority Route`, `qualifiedThreshold:70`, `thresholdSource:"workflow-default (n8n blocks $env access)"` |
+| 9 | clean run after restoring the committed workflow | `201`, `status=success`, full chain | exec 39: `201`, order = `… Route on API Status → Respond Created → Extract Lead + Score → … → Build Audit Event` |
+| 10 | **fault, pre-M9 order**: unconditional `throw` in `Extract Lead + Score` with `Respond Created` moved back to `[960,-240]` | documents the failure mode M9 fixes | exec 35: caller got `500 {"message":"Error in workflow"}`, execution `status=error` with the injected message persisted, `Respond Created` never ran — **and the row was still created** (lead 9): a fake API failure with an accepted lead |
+| 11 | **fault, early operational node**: same `throw`, committed workflow (respond above extract) | caller keeps `201`; failure visible; lead accepted | exec 36: `201` envelope returned, execution `status=error` (`M9 fault injection: operational node failure [line 1]`), `Respond Created` ran first, row exists (lead 10) |
+| 12 | **fault in the new audit node**: `throw` in `Build Audit Event` | caller keeps `201`; branch record still persisted; failure visible | exec 38: `201`, `Log Priority Route` record present (`leadId:12`, `event:"lead_qualified"`, full summary), execution `status=error` at `Build Audit Event`, row exists (lead 12) |
+
+Executions 25–26 (the first M9 runs, before the position fix) are what
+exposed the ordering problem: they show `Respond Created` executing *after*
+`Build Audit Event`. From case 9 onward every successful run shows the
+caller answered first.
+
+Also verified for this milestone: the structural validator over the JSON
+(15 nodes with unique ids/names, connection integrity, reachability from the
+single trigger, only the intended terminals — the three branch nodes now
+feed `Build Audit Event`, which is terminal; **every M7/M8 node and
+connection byte-identical to `HEAD`** except the three rewritten branch
+records and `Respond Created`'s canvas position; the `Respond Created` above
+`Extract Lead + Score` invariant; threshold/base-URL config still defined in
+exactly one node; no scoring logic, no SQL, no secrets or absolute paths;
+node `typeVersion`s present in the installed `n8n-nodes-base` sources:
+webhook `2.1`, code `2`, httpRequest `4.5`, switch `3.4`, respondToWebhook
+`1.5`); `pytest` → **83 passed** (backend untouched).
+
+Environment quirk hit while testing: n8n answers `/healthz` before its
+published webhooks are registered, so the very first request after a restart
+can return `404 Cannot POST /webhook/lead-intake`; it succeeded on retry a
+few seconds later. Not a workflow defect — the reload script now waits
+before handing over.
 
 ### Milestone 8 — run personally against a live n8n instance
 
@@ -346,8 +506,14 @@ response, which never carries the routing result.
 | 9 | boundary lead at default threshold (score 75 ≥ 70) | `qualified` | exec 19: `Log Priority Route`, `qualifiedThreshold: 70`, `thresholdSource: "workflow-default (n8n blocks $env access)"` |
 
 The webhook envelopes for scenarios 1–6 are byte-identical to Milestone 7's
-(the 201 branch still runs `Respond Created` first; qualification runs on a
-parallel fan-out).
+(qualification runs on a parallel fan-out, so the envelope never depends on
+it). **Correction from Milestone 9:** the sentence that used to follow here
+— "the 201 branch still runs `Respond Created` first" — was wrong. Measured
+from the persisted node start times, `Respond Created` ran *last* in these
+executions; see [Caller-response isolation](#caller-response-isolation) for
+what Milestone 9 did about it. (The `action`-shaped records in the table
+above were themselves superseded in Milestone 9 by the `event`/`summary`
+records — the current shape is documented earlier in this file.)
 
 Also verified for this milestone: a structural validator over the JSON
 (unique ids/names, all connection targets resolve, single webhook trigger,
@@ -373,16 +539,20 @@ as a regression check here (scenarios 1, 4, 5, 6 above reproduce its codes):
 | 6 | upstream returns HTTP `500` | `502 upstream_error`, `apiStatus: 500` | exactly that (Switch fallback branch) |
 | 7 | n8n default config (`$env` blocked) while `LEAD_API_BASE_URL` is set | workflow falls back to `DEFAULT_API_BASE_URL` | row landed in the *other* database — proving the constant was used, not the env var |
 
-**Not tested (either milestone):** running n8n in queue/multi-main mode,
-Dockerised n8n, `webhook-test` (editor) URLs, credential/auth flows (none is
-used), concurrent submissions to the same `(source, external_id)`, and any
-real notification channel (none exists here — records stay in execution data).
-The backend contract itself is covered by the 83 pytest tests.
+**Not tested (any milestone):** running n8n in queue/multi-main mode,
+Dockerised n8n, `webhook-test` (editor) URLs, manual "test" executions
+(so every observed audit event carries `executionMode: "production"`),
+credential/auth flows (none is used), concurrent submissions to the same
+`(source, external_id)`, and any real notification channel (none exists
+here — records stay in execution data). The backend contract itself is
+covered by the 83 pytest tests.
 
 **Known limitations:** the threshold is an unvalidated business default
-(above); execution-data records are only visible to someone with access to the
-n8n instance (UI or database) — nothing pushes them to a human; executions are
-saved for success runs (`saveDataOnSuccess: all` default), and a *failed*
-qualification node would surface as a failed execution status while the caller
-still got its `201` (by design of the fan-out, but it means routing failures
-are noticed only by monitoring, not by the caller).
+(above); execution-data records are only visible to someone with access to
+the n8n instance (UI or database) — nothing pushes them to a human, and
+there is no delivery, retry or acknowledgement of any kind; `timestamp` is
+n8n's wall clock at audit-node execution, not FastAPI's `created_at`
+(FastAPI's value stays on the lead row itself); a *failed* operational node
+surfaces as a failed execution (`status: error`) while the caller keeps its
+`201` — verified in cases 11–12 — which means operational failures are
+noticed only by monitoring of n8n, never by the caller.
