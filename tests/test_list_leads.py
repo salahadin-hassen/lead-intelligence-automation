@@ -146,6 +146,29 @@ def test_get_missing_lead_returns_404(client) -> None:
     assert response.json()["detail"] == "Lead not found"
 
 
+def test_status_query_param_name_is_stable(client) -> None:
+    """The wire-level parameter stays `status` on both filtered endpoints.
+
+    The route functions use a local name (`status_filter`) that must not
+    leak into the public API contract.
+    """
+    schema = client.get("/openapi.json").json()
+
+    list_params = {
+        param["name"]
+        for param in schema["paths"]["/leads"]["get"].get("parameters", [])
+    }
+    export_params = {
+        param["name"]
+        for param in schema["paths"]["/leads/export"]["get"].get("parameters", [])
+    }
+
+    assert "status" in list_params
+    assert "status" in export_params
+    assert "status_filter" not in list_params
+    assert "status_filter" not in export_params
+
+
 def test_get_non_integer_lead_id_returns_422(client) -> None:
     response = client.get("/leads/not-a-number")
 

@@ -123,12 +123,16 @@ def create_lead(lead: LeadCreate, scorer: Scorer = Depends(get_scorer)) -> LeadR
 
 @router.get("/leads", response_model=LeadListResponse)
 def list_leads(
-    status: str | None = None,
+    # Named status_filter so it does not shadow the imported fastapi.status
+    # module; the wire-level query parameter stays `?status=...`.
+    status_filter: str | None = Query(default=None, alias="status"),
     source: str | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> LeadListResponse:
-    items, total = db.list_leads(status=status, source=source, limit=limit, offset=offset)
+    items, total = db.list_leads(
+        status=status_filter, source=source, limit=limit, offset=offset
+    )
     return LeadListResponse(
         items=[_to_response(item) for item in items],
         total=total,
@@ -141,10 +145,12 @@ def list_leads(
 # would swallow "export" and answer 422.
 @router.get("/leads/export")
 def export_leads(
-    status: str | None = None,
+    # Same alias trick as list_leads: local name avoids shadowing
+    # fastapi.status while `?status=...` keeps working unchanged.
+    status_filter: str | None = Query(default=None, alias="status"),
     source: str | None = None,
 ) -> Response:
-    rows = db.export_leads(status=status, source=source)
+    rows = db.export_leads(status=status_filter, source=source)
     return Response(
         content=_build_csv(rows),
         media_type="text/csv",

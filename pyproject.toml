@@ -5,6 +5,7 @@ description = "Lead intake API: POST /leads stored in PostgreSQL."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi",
+    "uvicorn",
     "pydantic[email]",
     "psycopg[binary]",
     "psycopg-pool",

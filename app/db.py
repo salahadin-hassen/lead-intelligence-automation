@@ -119,6 +119,27 @@ def init_schema() -> None:
             conn.execute(path.read_text(encoding="utf-8"))
 
 
+# /health must answer promptly even when the pool is saturated: the pool's
+# default wait is 30 s, far too long for a probe.
+HEALTH_PING_TIMEOUT_SECONDS = 2.0
+
+
+def ping() -> None:
+    """Verify the pool can reach PostgreSQL by running the cheapest query.
+
+    Used by GET /health so the endpoint distinguishes "process is up" from
+    "the database is actually reachable". Runs on the existing pool; no
+    separate connection mechanism.
+
+    Raises:
+        RuntimeError: if the pool has not been configured.
+        psycopg.Error / psycopg_pool.PoolTimeout: if the database is
+            unreachable or no connection frees up in time.
+    """
+    with _get_pool().connection(timeout=HEALTH_PING_TIMEOUT_SECONDS) as conn:
+        conn.execute("SELECT 1")
+
+
 def create_lead(lead: LeadCreate) -> dict:
     """Insert a lead and return its database-generated fields.
 
