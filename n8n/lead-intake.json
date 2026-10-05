@@ -1,0 +1,304 @@
+{
+  "id": "lead-intake",
+  "name": "Lead Intake to FastAPI",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000001",
+      "name": "Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "lead-intake"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// --- configuration -------------------------------------------------\n// Base URL of the FastAPI service (no trailing slash, no /leads).\n// Override it with the LEAD_API_BASE_URL environment variable of the n8n\n// process. n8n 2.x blocks $env in expressions and Code nodes by default\n// (N8N_BLOCK_ENV_ACCESS_IN_NODE), so the lookup is probed defensively and\n// falls back to this documented default. apiBaseUrlSource records which\n// source was used and is visible in every execution.\nconst DEFAULT_API_BASE_URL = 'http://localhost:8000';\n\nlet apiBaseUrl = DEFAULT_API_BASE_URL;\nlet apiBaseUrlSource = 'workflow-default';\ntry {\n  const fromEnv = $env.LEAD_API_BASE_URL;\n  if (fromEnv) {\n    apiBaseUrl = String(fromEnv).replace(/\\/+$/, '');\n    apiBaseUrlSource = 'environment';\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE) or unavailable.\n  apiBaseUrlSource = 'workflow-default (n8n blocks $env access)';\n}\n\n// --- payload mapping ------------------------------------------------\n// FastAPI owns validation, persistence, duplicate detection and scoring.\n// This node only copies the documented contract fields out of the webhook\n// body and drops everything else - no validation rules are re-implemented.\nconst body = $input.first().json.body || {};\n\nconst lead = {\n  name: body.name ?? null,\n  email: body.email ?? null,\n  company: body.company ?? null,\n  message: body.message ?? null,\n  source: body.source || 'n8n-webhook',\n  external_id: body.external_id ?? null,\n};\n\nreturn [{ json: { lead, apiLeadsUrl: `${apiBaseUrl}/leads`, apiBaseUrlSource } }];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000002",
+      "name": "Prepare Lead Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.apiLeadsUrl }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.lead) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000003",
+      "name": "Create Lead in FastAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        0
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-created",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 201,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "created"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-duplicate",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 409,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "duplicate"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-validation",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 422,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "validation_failed"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000004",
+      "name": "Route on API Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ outcome: 'created', apiStatus: $json.statusCode, lead: $json.body }) }}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000005",
+      "name": "Respond Created",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ outcome: 'duplicate', apiStatus: $json.statusCode, detail: ($json.body && $json.body.detail) || 'A lead with this source and external_id already exists' }) }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000006",
+      "name": "Respond Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ outcome: 'validation_failed', apiStatus: $json.statusCode, detail: ($json.body && $json.body.detail) || 'The lead payload was rejected by FastAPI' }) }}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000007",
+      "name": "Respond Validation Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ outcome: 'upstream_error', apiStatus: $json.statusCode || null, detail: 'The lead API did not accept the request' }) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000008",
+      "name": "Respond Upstream Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Lead Webhook": {
+      "main": [
+        [
+          {
+            "node": "Prepare Lead Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Lead Payload": {
+      "main": [
+        [
+          {
+            "node": "Create Lead in FastAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Lead in FastAPI": {
+      "main": [
+        [
+          {
+            "node": "Route on API Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route on API Status": {
+      "main": [
+        [
+          {
+            "node": "Respond Created",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Validation Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Upstream Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateSource": "lead-intelligence-automation"
+  }
+}

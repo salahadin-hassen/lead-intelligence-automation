@@ -2,7 +2,7 @@
 
 A FastAPI + PostgreSQL backend that ingests B2B leads, scores them, and drives
 them through a qualification workflow — built as the data backbone for an
-upcoming **n8n automation layer**.
+**n8n automation layer** (`n8n/lead-intake.json`).
 
 This is not a CRUD demo: intake is designed to survive an unavailable scoring
 backend, uniqueness and data integrity are enforced by the database rather than
@@ -25,6 +25,8 @@ missing.
   omits) with proper escaping; single-lead `DELETE`.
 - **Health probe** — `/health` returns `200` only when PostgreSQL is actually
   reachable, `503` otherwise.
+- **n8n intake workflow** — importable webhook → `POST /leads` → response
+  workflow that forwards FastAPI's real status instead of fabricating success.
 
 ## Architecture
 
@@ -45,6 +47,7 @@ route (orchestration only)
 | `app/models.py` | Pydantic request/response models |
 | `app/config.py` | Settings from environment / `.env` |
 | `sql/` | Idempotent migrations, auto-applied at startup |
+| `n8n/lead-intake.json` | Importable n8n workflow — orchestration only, no business rules |
 
 Rules the code enforces: SQL never leaves `app/db.py`, provider code never
 leaves `app/scoring.py`, and PostgreSQL-specific errors never reach a route.
@@ -181,6 +184,54 @@ OPENAI_API_KEY absent → deterministic offline heuristic (default)
   the lead is still created; database errors, by contrast, always propagate.
   A duplicate `(source, external_id)` returns `409` *before* any scoring call.
 
+## n8n integration
+
+`n8n/lead-intake.json` is the first automation boundary: an importable
+workflow that receives an external lead over a webhook and hands it to this
+API.
+
+```
+Webhook (POST /webhook/lead-intake)
+  → Prepare Lead Payload   resolve the API base URL (env var or documented
+                           default), map the six contract fields, drop
+                           unknown ones, default source = "n8n-webhook"
+  → HTTP Request           POST {base}/leads (JSON, 10 s, no retries)
+  → Switch on statusCode   201 | 409 | 422 | fallback
+  → Respond Created (201) · Respond Duplicate (409) ·
+    Respond Validation Failed (422) · Respond Upstream Error (502)
+```
+
+- **n8n orchestrates, FastAPI decides.** No validation rules, scoring logic or
+  SQL are duplicated in the workflow; the HTTP node uses `neverError` +
+  `onError: continueRegularOutput` so a 409/422/5xx flows through the graph
+  instead of failing the execution.
+- **No fabricated success.** Every webhook answer is an envelope
+  `{"outcome", "apiStatus", ...}` whose code mirrors what FastAPI returned
+  (`created`/201, `duplicate`/409, `validation_failed`/422, `upstream_error`/502
+  when the API could not be reached, `apiStatus: null` when no response arrived
+  at all).
+- **Configuration:** set `LEAD_API_BASE_URL` in the n8n process environment —
+  note that **n8n 2.x blocks `$env` by default**, so also set
+  `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` (otherwise the workflow falls back to
+  the `DEFAULT_API_BASE_URL` constant at the top of the `Prepare Lead Payload`
+  node, and its output shows which source was used). No secrets are stored in
+  the JSON — the API is unauthenticated today.
+
+```bash
+n8n import:workflow --input=n8n/lead-intake.json   # upserts by the shipped id
+n8n publish:workflow --id=lead-intake              # activate (n8n 2.x)
+# restart n8n if it was already running, then:
+curl -X POST localhost:5678/webhook/lead-intake -H 'Content-Type: application/json' \
+  -d '{"name":"Ada Lovelace","email":"ada@example.com","company":"Analytical Engines Ltd",
+       "message":"Please send pricing for the enterprise plan.",
+       "source":"partner-referral","external_id":"ext-9001"}'
+```
+
+**Validated against a live n8n 2.41.7 instance** — created/duplicate/
+invalid/unreachable/upstream-500 scenarios all returned the documented codes,
+plus `pytest` (83 passing). Details and the exact scenario table:
+[`docs/n8n-integration.md`](docs/n8n-integration.md).
+
 ## Configuration
 
 Read from the environment or `.env` (`.env` is gitignored; `.env.example` is
@@ -193,6 +244,14 @@ the committed template). Secrets are never printed, logged or returned.
 | `OPENAI_API_KEY` | no | *(unset → heuristic)* | Enables LLM scoring |
 | `OPENAI_BASE_URL` | no | `https://api.openai.com/v1` | Provider endpoint |
 | `LEAD_SCORING_MODEL` | no | `gpt-4o-mini` | Scoring model |
+
+The two variables below are **n8n-side** (the environment of the n8n process),
+not part of this service's `.env`:
+
+| Variable (n8n process env) | Required | Default | Purpose |
+|---|---|---|---|
+| `LEAD_API_BASE_URL` | production | `http://localhost:8000` (constant in the workflow) | FastAPI base URL the workflow calls |
+| `N8N_BLOCK_ENV_ACCESS_IN_NODE` | no | *(unset = blocked on n8n 2.x)* | `false` lets the workflow read `LEAD_API_BASE_URL` |
 
 ## Data model
 
@@ -225,8 +284,10 @@ app/
   config.py          settings
   errors.py          application-level exceptions
 sql/                 001–004 idempotent migrations
+n8n/lead-intake.json importable webhook → POST /leads workflow
 tests/               83 integration + unit tests
 docs/requirements.md source of truth for project scope
+docs/n8n-integration.md  the n8n contract and operating guide
 ```
 
 ## Design principles
@@ -244,11 +305,13 @@ docs/requirements.md source of truth for project scope
 
 **In scope today:** intake, retrieval, scoring, status workflow, export,
 deletion, health — as specified in [`docs/requirements.md`](docs/requirements.md)
-(Milestones 1–6), plus a hardening pass (indexes, health probe, docs).
+(Milestones 1–6), plus a hardening pass (indexes, health probe, docs) and the
+first n8n intake workflow (Milestone 7).
 
 **Deliberately out of scope:** authentication, rate limiting, Docker, CRM,
 background workers, frontend, email/Telegram, status transition-graph
-enforcement. The service is not exposed publicly in its current form.
+enforcement, retries/queues, multi-workflow automation. The service is not
+exposed publicly in its current form.
 
-**Next:** the n8n automation layer — workflow triggers consuming this API for
-lead routing, notifications and CRM handoff.
+**Next:** more n8n workflows on top of this boundary — notifications, lead
+routing and CRM handoff.

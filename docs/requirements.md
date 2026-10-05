@@ -434,7 +434,85 @@ JSON export, Excel formats, pagination/streaming for huge exports, bulk
 delete, soft delete/retention, auth on export/delete (still unauthenticated
 like every endpoint), n8n, CRM, Docker, workers, email, Telegram, frontend.
 
+## Milestone 7: n8n Lead Intake Integration
+
+The first automation boundary: one importable n8n workflow that accepts an
+external lead over a webhook, forwards it to the existing `POST /leads`, and
+returns FastAPI's **real** result to the caller. n8n orchestrates; FastAPI
+keeps owning validation, persistence, duplicate detection, scoring and all
+SQL. Full reference: [`docs/n8n-integration.md`](n8n-integration.md).
+
+### Artifact — `n8n/lead-intake.json`
+
+```
+Lead Webhook (POST /webhook/lead-intake, responseMode: responseNode)
+    ↓
+Prepare Lead Payload      resolve the API base URL ($env or the documented
+                          default) → apiLeadsUrl; map the six contract fields,
+                          drop unknown fields, default source = "n8n-webhook"
+                          — no validation rules
+    ↓
+Create Lead in FastAPI    HTTP Request POST {apiLeadsUrl}
+                          JSON body · fullResponse · neverError ·
+                          onError: continueRegularOutput · 10 s timeout · no retries
+    ↓
+Route on API Status       Switch on statusCode: 201 | 409 | 422 | fallback
+    ↓
+Respond Created (201) · Respond Duplicate (409) ·
+Respond Validation Failed (422) · Respond Upstream Error (502)
+```
+
+### Webhook contract (envelope mirrors the API)
+
+| `outcome` | Webhook code | Extra fields | Source |
+|---|---|---|---|
+| `created` | `201` | `lead` = FastAPI `LeadResponse` | API `201` |
+| `duplicate` | `409` | `detail` | API `409` |
+| `validation_failed` | `422` | `detail` = FastAPI field errors, passed through | API `422` |
+| `upstream_error` | `502` | `detail` generic, `apiStatus` `null` when no response arrived | transport failure / unexpected status |
+
+Every envelope carries `apiStatus` (what FastAPI actually returned). Success is
+never fabricated: a webhook `201` exists only because PostgreSQL stored the row.
+
+### Configuration
+
+- `LEAD_API_BASE_URL` — base URL of the FastAPI service (no trailing `/leads`),
+  read by the `Prepare Lead Payload` code node via n8n's `$env` accessor.
+- **n8n 2.x blocks `$env` by default** (`N8N_BLOCK_ENV_ACCESS_IN_NODE` unset →
+  denied), so the lookup is wrapped in `try/catch` and falls back to the
+  `DEFAULT_API_BASE_URL` constant (`http://localhost:8000`) at the top of that
+  node; set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` to use the environment
+  variable. The node writes `apiBaseUrlSource` (`environment` /
+  `workflow-default …`) to every execution so the active source is visible.
+- The shipped `"id": "lead-intake"` makes `n8n import:workflow` an upsert, and
+  `n8n publish:workflow --id=lead-intake` activates it on n8n 2.x.
+- No credentials in the JSON: the API is unauthenticated, so n8n needs no
+  credential either. When auth is added later it attaches as an n8n credential.
+
+### Tests / validation (Milestone 7)
+
+1. Existing suites stay green (83 tests) — valid create, invalid payload,
+   duplicate, and scoring-failure-never-breaks-intake are already covered by
+   `tests/test_create_lead.py` and `tests/test_lead_scoring.py`; no redundant
+   contract tests are added.
+2. The artifact is parsed and structurally checked (every connection target
+   exists, single root, no orphan nodes, no secrets) with a JSON parser, and
+   accepted by n8n's own `validateWorkflowStructure` during
+   `n8n import:workflow`.
+3. **Live n8n execution was performed** against n8n 2.41.7 (import → publish →
+   production webhook): created → `201`, duplicate → `409`, invalid payload →
+   `422`, API stopped → `502` with `apiStatus: null`, upstream `500` → `502`
+   with `apiStatus: 500`, and the env-blocked fallback → documented default.
+   The scenario table lives in [`docs/n8n-integration.md`](n8n-integration.md).
+
+### Out of scope for Milestone 7
+
+Notifications (email/Telegram/Slack), CRM handoff, enrichment, scheduled
+follow-ups, retries/queues, authentication, rate limiting, Docker, multi-workflow
+architecture, and any change to the FastAPI schema or endpoints.
+
 ## Out of scope
 
-n8n, CRM, authentication, Docker, background workers, unrelated features.
+n8n beyond the single lead-intake workflow of Milestone 7, CRM, authentication,
+Docker, background workers, unrelated features.
 (AI is in scope via the Milestone 3 spec above.)
