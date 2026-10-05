@@ -511,8 +511,96 @@ Notifications (email/Telegram/Slack), CRM handoff, enrichment, scheduled
 follow-ups, retries/queues, authentication, rate limiting, Docker, multi-workflow
 architecture, and any change to the FastAPI schema or endpoints.
 
+## Milestone 8: n8n Lead Qualification Routing
+
+The existing intake workflow becomes a basic qualification pipeline: FastAPI's
+score (Milestones 3/4) is turned into a deterministic routing decision inside
+n8n, with visibly divergent actions per branch. FastAPI keeps owning
+validation, persistence, duplicate detection **and scoring**; n8n owns
+orchestration, the qualification branch, and the routing actions. Full
+reference: [`docs/n8n-integration.md`](n8n-integration.md).
+
+### Rule (computed once, in one node)
+
+```
+score is not a finite number (null / missing)  →  manual_review  (priority null)
+score >= threshold                             →  qualified      (priority high)
+score <  threshold                             →  not_qualified  (priority normal)
+```
+
+- Threshold **70**, a configurable **initial business rule — not empirically
+  validated** (no conversion data exists in this project). Grounding: the
+  heuristic baseline is 45; observed representative scores cluster at
+  12/15/35 (junk), 63/63 (corporate inbound, no intent keyword) and
+  77–100 (explicit intent keyword) — 70 sits in the natural 63→77 gap.
+- **Single configuration source:** the `DEFAULT_QUALIFIED_THRESHOLD` constant
+  and the `LEAD_QUALIFIED_THRESHOLD` env probe live only in the
+  `Prepare Lead Payload` config block (same block as the base URL); the
+  `Qualification` node reads the resolved value from that node's output and
+  never redefines it. Every execution records `qualifiedThreshold` +
+  `thresholdSource`.
+- `null` stays `null`: an unscored lead goes to `manual_review` with
+  `score: null` in the record — never `0`, never silently not-qualified.
+- The backend's persisted `status` field (`new/contacted/qualified/closed`,
+  Milestone 5, manual PATCH) is **not** written by this workflow;
+  `qualification` is a separate internal routing label.
+
+### Artifact — added to `n8n/lead-intake.json`
+
+```
+Route on API Status ── 201 ──┬─► Respond Created            (Milestone 7 envelope, unchanged)
+                             └─► Extract Lead + Score   normalize LeadResponse
+                                      ↓
+                                 Qualification        apply the rule once
+                                      ↓
+                                 Route on Qualification   switch on the label
+                                      ├─ qualified     ─► Log Priority Route
+                                      ├─ not_qualified ─► Log Normal Route
+                                      ├─ manual_review ─► Log Manual Review
+                                      └─ (fallback)    ─► Log Manual Review
+(409 / 422 / fallback branches of Route on API Status are untouched)
+```
+
+**Notification:** this environment has no email/Slack/Telegram/CRM, so each
+terminal node performs its action by emitting one structured record
+(`action`, `leadId`, `company`, `source`, `score`, `qualification`,
+`priority`, `qualifiedThreshold`, plus `note` on manual review) **as its node
+output**, persisted in n8n's execution data — workflow-native, inspectable,
+no credentials or third-party accounts.
+
+### Tests / validation (Milestone 8)
+
+1. Existing suites stay green (**83 tests**) — no backend change was needed
+   (the `LeadResponse` contract already carries `lead_id`/`score`/`company`/
+   `source`), so no new backend tests are added.
+2. Structural validation of the workflow JSON (unique ids/names, connection
+   integrity, reachability, single trigger, intended terminals only, M7 nodes
+   and non-201 connections byte-identical to the previous commit, threshold
+   defined in exactly one node, no secrets/paths, `typeVersion`s present in
+   the installed `n8n-nodes-base`), plus n8n's own
+   `validateWorkflowStructure` at import time.
+3. **Live n8n execution, run personally** against n8n 2.41.7 (import →
+   publish → production webhook), branch outcomes read from n8n's persisted
+   execution data: qualified (95 → `Log Priority Route`), not-qualified
+   (12 → `Log Normal Route`), unscored (`score: null` → `Log Manual
+   Review`), duplicate → 409, invalid payload → 422, API stopped → 502 —
+   with the 409/422/502 paths confirmed to **not** enter qualification —
+   plus a threshold-flip run (`LEAD_QUALIFIED_THRESHOLD=95`, env allowed):
+   the same score-75 lead that qualified at 70 became `not_qualified`
+   (`thresholdSource: environment`), and score 95 at threshold 95 still
+   qualifies (`>=`). Scenario table: [`docs/n8n-integration.md`](n8n-integration.md).
+
+### Out of scope for Milestone 8
+
+Delivering the routing records anywhere outside n8n's execution data
+(email/Telegram/Slack/CRM/webhook-out — none exists in this environment and
+none is faked), enrichment, scheduled follow-ups, retries/queues,
+authentication, rate limiting, Docker, additional workflows, and **any change
+to FastAPI** (no contract gap was found: `score` is already `int | None` and
+the response already carries every field the routing needs).
+
 ## Out of scope
 
-n8n beyond the single lead-intake workflow of Milestone 7, CRM, authentication,
-Docker, background workers, unrelated features.
+n8n beyond the single lead-intake workflow of Milestones 7–8, CRM,
+authentication, Docker, background workers, unrelated features.
 (AI is in scope via the Milestone 3 spec above.)

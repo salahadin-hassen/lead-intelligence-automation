@@ -1,6 +1,6 @@
 {
   "id": "lead-intake",
-  "name": "Lead Intake to FastAPI",
+  "name": "Lead Intake & Qualification",
   "nodes": [
     {
       "parameters": {
@@ -22,7 +22,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// --- configuration -------------------------------------------------\n// Base URL of the FastAPI service (no trailing slash, no /leads).\n// Override it with the LEAD_API_BASE_URL environment variable of the n8n\n// process. n8n 2.x blocks $env in expressions and Code nodes by default\n// (N8N_BLOCK_ENV_ACCESS_IN_NODE), so the lookup is probed defensively and\n// falls back to this documented default. apiBaseUrlSource records which\n// source was used and is visible in every execution.\nconst DEFAULT_API_BASE_URL = 'http://localhost:8000';\n\nlet apiBaseUrl = DEFAULT_API_BASE_URL;\nlet apiBaseUrlSource = 'workflow-default';\ntry {\n  const fromEnv = $env.LEAD_API_BASE_URL;\n  if (fromEnv) {\n    apiBaseUrl = String(fromEnv).replace(/\\/+$/, '');\n    apiBaseUrlSource = 'environment';\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE) or unavailable.\n  apiBaseUrlSource = 'workflow-default (n8n blocks $env access)';\n}\n\n// --- payload mapping ------------------------------------------------\n// FastAPI owns validation, persistence, duplicate detection and scoring.\n// This node only copies the documented contract fields out of the webhook\n// body and drops everything else - no validation rules are re-implemented.\nconst body = $input.first().json.body || {};\n\nconst lead = {\n  name: body.name ?? null,\n  email: body.email ?? null,\n  company: body.company ?? null,\n  message: body.message ?? null,\n  source: body.source || 'n8n-webhook',\n  external_id: body.external_id ?? null,\n};\n\nreturn [{ json: { lead, apiLeadsUrl: `${apiBaseUrl}/leads`, apiBaseUrlSource } }];"
+        "jsCode": "// --- configuration -------------------------------------------------\n// Single configuration source for the whole workflow: base URL of the\n// FastAPI service (no trailing slash, no /leads) AND the lead\n// qualification threshold (integer 0-100). Override them with the\n// LEAD_API_BASE_URL / LEAD_QUALIFIED_THRESHOLD environment variables of\n// the n8n process. n8n 2.x blocks $env in expressions and Code nodes by\n// default (N8N_BLOCK_ENV_ACCESS_IN_NODE), so each lookup is probed\n// defensively and falls back to the documented defaults below. The\n// *Source fields record which source was used and are visible in every\n// execution; downstream nodes read this configuration from this node's\n// output with $('Prepare Lead Payload') - the values are never repeated\n// in another node.\nconst DEFAULT_API_BASE_URL = 'http://localhost:8000';\n// Initial business rule, NOT an empirically validated sales threshold:\n// the heuristic scorer starts at a baseline of 45; representative leads\n// score 12-35 (junk), 63 (corporate inbound without an intent keyword)\n// and 77-100 (explicit buying intent), so 70 sits in the observed 63-77\n// gap and requires net positive signal above baseline. Tune it with\n// LEAD_QUALIFIED_THRESHOLD (0-100).\nconst DEFAULT_QUALIFIED_THRESHOLD = 70;\n\nlet apiBaseUrl = DEFAULT_API_BASE_URL;\nlet apiBaseUrlSource = 'workflow-default';\ntry {\n  const fromEnv = $env.LEAD_API_BASE_URL;\n  if (fromEnv) {\n    apiBaseUrl = String(fromEnv).replace(/\\/+$/, '');\n    apiBaseUrlSource = 'environment';\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE) or unavailable.\n  apiBaseUrlSource = 'workflow-default (n8n blocks $env access)';\n}\n\nlet qualifiedThreshold = DEFAULT_QUALIFIED_THRESHOLD;\nlet thresholdSource = 'workflow-default';\ntry {\n  const fromEnv = $env.LEAD_QUALIFIED_THRESHOLD;\n  if (fromEnv !== undefined && fromEnv !== null && String(fromEnv).trim() !== '') {\n    const parsed = Number(fromEnv);\n    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 100) {\n      qualifiedThreshold = parsed;\n      thresholdSource = 'environment';\n    } else {\n      thresholdSource = 'workflow-default (invalid LEAD_QUALIFIED_THRESHOLD)';\n    }\n  }\n} catch (err) {\n  thresholdSource = 'workflow-default (n8n blocks $env access)';\n}\n\n// --- payload mapping ------------------------------------------------\n// FastAPI owns validation, persistence, duplicate detection and scoring.\n// This node only copies the documented contract fields out of the webhook\n// body and drops everything else - no validation rules are re-implemented.\nconst body = $input.first().json.body || {};\n\nconst lead = {\n  name: body.name ?? null,\n  email: body.email ?? null,\n  company: body.company ?? null,\n  message: body.message ?? null,\n  source: body.source || 'n8n-webhook',\n  external_id: body.external_id ?? null,\n};\n\nreturn [{\n  json: {\n    lead,\n    apiLeadsUrl: `${apiBaseUrl}/leads`,\n    apiBaseUrlSource,\n    qualifiedThreshold,\n    thresholdSource,\n  },\n}];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000002",
       "name": "Prepare Lead Payload",
@@ -225,6 +225,164 @@
         960,
         240
       ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normalize the successful (201) API response into the routing base\n// result. FastAPI owns scoring - this node only copies the score it\n// returned. score stays null when FastAPI could not score the lead; it\n// is never coerced to 0 and never invented here.\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\n\nconst rawScore = body.score;\nconst score = (typeof rawScore === 'number' && Number.isFinite(rawScore))\n  ? rawScore\n  : null;\n\nreturn [{\n  json: {\n    apiStatus: typeof http.statusCode === 'number' ? http.statusCode : null,\n    leadId: body.lead_id ?? null,\n    company: body.company ?? null,\n    source: body.source ?? null,\n    score,\n    scoreReason: body.score_reason ?? null,\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000009",
+      "name": "Extract Lead + Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Qualification decision - the single place where the threshold rule is\n// applied (Milestone 8). FastAPI still owns the score; this node only\n// labels what FastAPI returned.\n//\n//   score not a finite number (null / missing)  -> manual_review, priority null\n//   score >= threshold                          -> qualified,     priority \"high\"\n//   score <  threshold                          -> not_qualified, priority \"normal\"\n//\n// The threshold comes from the configuration block of \"Prepare Lead\n// Payload\" (one config source, never redefined here). If that config is\n// missing or malformed the lead goes to manual review instead of guessing.\nconst config = $('Prepare Lead Payload').first().json || {};\nconst threshold = config.qualifiedThreshold;\nconst extracted = $input.first().json;\nconst score = extracted.score;\n\nconst thresholdOk = typeof threshold === 'number' && Number.isFinite(threshold);\n\nlet qualification;\nlet priority;\nif (!thresholdOk || typeof score !== 'number' || !Number.isFinite(score)) {\n  qualification = 'manual_review';\n  priority = null;\n} else if (score >= threshold) {\n  qualification = 'qualified';\n  priority = 'high';\n} else {\n  qualification = 'not_qualified';\n  priority = 'normal';\n}\n\nreturn [{\n  json: {\n    ...extracted,\n    qualification,\n    priority,\n    qualifiedThreshold: thresholdOk ? threshold : null,\n    thresholdSource: config.thresholdSource ?? 'unknown',\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000010",
+      "name": "Qualification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-qualified",
+                    "leftValue": "={{ $json.qualification }}",
+                    "rightValue": "qualified",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qualified"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-not-qualified",
+                    "leftValue": "={{ $json.qualification }}",
+                    "rightValue": "not_qualified",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "not_qualified"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-manual-review",
+                    "leftValue": "={{ $json.qualification }}",
+                    "rightValue": "manual_review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "manual_review"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000011",
+      "name": "Route on Qualification",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1440,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Priority routing notification for a qualified lead (Milestone 8).\n// Delivery mechanism: the record below is this node's output, persisted in\n// n8n's execution data and shown in the execution view. This environment\n// has no email/Slack/Telegram/SMTP/CRM integration, so nothing is sent\n// elsewhere and no credentials or third-party accounts are used.\nconst lead = $input.first().json;\n\nreturn [{\n  json: {\n    action: 'priority_route',\n    leadId: lead.leadId,\n    company: lead.company,\n    source: lead.source,\n    score: lead.score,\n    qualification: lead.qualification,\n    priority: lead.priority,\n    qualifiedThreshold: lead.qualifiedThreshold,\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000012",
+      "name": "Log Priority Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normal routing notification for a lead below the qualification\n// threshold (Milestone 8). Same delivery mechanism as the priority route:\n// the record is this node's output, persisted in n8n's execution data.\nconst lead = $input.first().json;\n\nreturn [{\n  json: {\n    action: 'normal_route',\n    leadId: lead.leadId,\n    company: lead.company,\n    source: lead.source,\n    score: lead.score,\n    qualification: lead.qualification,\n    priority: lead.priority,\n    qualifiedThreshold: lead.qualifiedThreshold,\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000013",
+      "name": "Log Normal Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Manual review routing notification: FastAPI could not score the lead\n// (score null) or the qualification state could not be determined\n// (Milestone 8). The score is reported as null - never replaced with 0 or\n// any guess. Same delivery mechanism as the other routes: this node's\n// output, persisted in n8n's execution data.\nconst lead = $input.first().json;\nconst score = (typeof lead.score === 'number' && Number.isFinite(lead.score))\n  ? lead.score\n  : null;\n\nreturn [{\n  json: {\n    action: 'manual_review',\n    leadId: lead.leadId,\n    company: lead.company,\n    source: lead.source,\n    score,\n    qualification: lead.qualification || 'manual_review',\n    priority: lead.priority ?? null,\n    note: score === null\n      ? 'scoring unavailable - manual review required'\n      : 'qualification could not be determined - manual review required',\n    qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000014",
+      "name": "Log Manual Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -400
+      ]
     }
   ],
   "connections": {
@@ -268,6 +426,11 @@
             "node": "Respond Created",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Extract Lead + Score",
+            "type": "main",
+            "index": 0
           }
         ],
         [
@@ -287,6 +450,60 @@
         [
           {
             "node": "Respond Upstream Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Lead + Score": {
+      "main": [
+        [
+          {
+            "node": "Qualification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualification": {
+      "main": [
+        [
+          {
+            "node": "Route on Qualification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route on Qualification": {
+      "main": [
+        [
+          {
+            "node": "Log Priority Route",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Normal Route",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Manual Review",
             "type": "main",
             "index": 0
           }
