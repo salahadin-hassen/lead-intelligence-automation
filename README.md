@@ -16,9 +16,9 @@ missing.
   on `(source, external_id)` → `409`, never a second row.
 - **Retrieval** — paginated, filterable listing (`status`, `source`) plus
   single-lead lookup, newest first.
-- **Lead scoring** — deterministic offline heuristic by default, optional
-  OpenAI-compatible LLM scoring when a key is configured. Scoring failures
-  never fail intake: the lead is still created with `score = NULL`.
+- **Lead scoring** — provider-configurable OpenRouter free-model routing by
+  default, with a deterministic local heuristic fallback. OpenAI-compatible
+  providers are optional; scoring failures never fail intake.
 - **Status workflow** — `new → contacted → qualified → closed`, validated in
   Pydantic *and* guarded by a database `CHECK` constraint.
 - **CSV export & deletion** — full-fidelity CSV (including fields the JSON API
@@ -96,8 +96,8 @@ each boot and is idempotent by construction.
 .venv/bin/python -m pytest
 ```
 
-**83 tests**, fully offline with respect to AI providers (scorers are injected
-through FastAPI dependencies; no API key, no network calls to any LLM).
+Automated tests run fully offline with respect to AI providers (provider
+responses are mocked; no API key or network calls to any LLM).
 
 Tests run against a **real PostgreSQL test database** named by
 `TEST_DATABASE_URL`. By design there are no skips and no xfails: if the test
@@ -177,25 +177,40 @@ status, and same-status updates are idempotent.
 
 ## Lead scoring
 
-The route's scorer is a dispatcher:
+The route's scorer is a provider-configurable dispatcher:
 
 ```
-OPENAI_API_KEY set    → LLM scorer (OpenAI-compatible /chat/completions,
-                        5 s timeout, temperature 0, strict JSON reply)
-OPENAI_API_KEY absent → deterministic offline heuristic (default)
+LLM_API_KEY set       → configured LLM via /chat/completions
+LLM_API_KEY absent or LLM fails → deterministic heuristic
+both scorers fail     → score = NULL (manual review in n8n)
 ```
 
+- **Default provider** — OpenRouter at `https://openrouter.ai/api/v1`, using
+  the configurable `openrouter/free` model router. The router may select
+  among available free models; availability, rate limits and output can vary.
+  OpenRouter currently documents 50 free-model requests per day without
+  purchased credits; this provider limit can change. The application does not
+  fall back to a paid model or provider. See the
+  [free router docs](https://openrouter.ai/docs/guides/routing/routers/free-router)
+  and [current rate-limit FAQ](https://openrouter.ai/docs/faq#how-are-rate-limits-calculated).
+  OpenAI-compatible providers can be configured with `LLM_PROVIDER`,
+  `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`. No OpenAI subscription or
+  paid API credits are required by this application.
 - **Heuristic** — pure function of the lead: base score, high-intent keyword
   hits in `message` (capped), message length, corporate vs. free-mail domain,
   and source weight. Clamped to `0–100` with a human-readable `score_reason`
   (≤ 280 chars). No randomness, no clock, no I/O, no data leaves the machine.
 - **LLM** — prompt input is limited to `source`, `company` and `message`
-  (no name or email, to minimize PII). Replies are parsed with Pydantic;
-  bad JSON, out-of-range scores, timeouts and HTTP errors all degrade to
-  `score = NULL`.
-- **Intake never fails because of scoring.** A scorer exception is logged and
-  the lead is still created; database errors, by contrast, always propagate.
-  A duplicate `(source, external_id)` returns `409` *before* any scoring call.
+  (no name or email, to minimize PII). Those fields are sent to the configured
+  provider. The message may itself contain personal or sensitive data, so
+  don't send such leads through free third-party inference. Provider-specific
+  data-use and retention terms apply; this free path is intended for
+  demo/portfolio use, not sensitive or regulated leads. The score must be a
+  JSON integer in `0–100`; malformed responses trigger heuristic fallback.
+- **Intake never fails because of scoring.** The response contract is
+  unchanged. A `null` score means both the LLM and heuristic scorer were
+  unavailable. Database errors still propagate. A duplicate
+  `(source, external_id)` returns `409` *before* any scoring call.
 
 ## n8n integration
 
@@ -409,9 +424,10 @@ committed `CHANGE_ME` templates — `deploy/env/api.env` (this table),
 |---|---|---|---|
 | `DATABASE_URL` | yes | — | Application PostgreSQL DSN |
 | `TEST_DATABASE_URL` | tests only | — | DSN the test suite runs against |
-| `OPENAI_API_KEY` | no | *(unset → heuristic)* | Enables LLM scoring |
-| `OPENAI_BASE_URL` | no | `https://api.openai.com/v1` | Provider endpoint |
-| `LEAD_SCORING_MODEL` | no | `gpt-4o-mini` | Scoring model |
+| `LLM_PROVIDER` | no | `openrouter` | `openrouter` or `openai-compatible` |
+| `LLM_BASE_URL` | no | provider default | OpenAI-compatible endpoint |
+| `LLM_MODEL` | no | `openrouter/free` | Configured model/router |
+| `LLM_API_KEY` | no | *(unset → heuristic)* | Provider credential; never returned or logged |
 
 The variables below are **n8n-side** (the environment of the n8n process),
 not part of this service's `.env`:

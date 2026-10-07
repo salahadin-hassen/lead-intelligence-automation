@@ -837,3 +837,74 @@ authentication, Docker, background workers, a production frontend or
 hosting (the Milestone 11 form is a local demo artifact), unrelated
 features.
 (AI is in scope via the Milestone 3 spec above.)
+
+## Milestone 14: Provider-Agnostic LLM Scoring with Heuristic Fallback
+
+Milestone 14 supersedes the Milestone 4 behavior that returned no score when a
+configured LLM failed. FastAPI continues to own provider selection, scoring,
+score validation and fallback. n8n continues to own qualification, routing,
+audit events and notification; the API and workflow contracts are unchanged.
+
+### Configuration
+
+Settings are centralized in `app/config.py` and loaded from environment or
+`.env`. No API key is printed, logged or returned.
+
+| Setting | Default | Behavior |
+|---|---|---|
+| `LLM_PROVIDER` | `openrouter` | `openrouter` or `openai-compatible` |
+| `LLM_BASE_URL` | provider default | OpenRouter defaults to `https://openrouter.ai/api/v1`; the OpenAI-compatible option defaults to `https://api.openai.com/v1` |
+| `LLM_MODEL` | `openrouter/free` | Model/router sent to the OpenAI-compatible chat completions endpoint |
+| `LLM_API_KEY` | unset | Missing key skips the LLM and runs the heuristic |
+
+The default route uses OpenRouter's `openrouter/free` model router through
+`/chat/completions`; it can choose among currently available free models. The
+model identifier is configuration, not business logic. The same HTTP
+interface supports an OpenAI-compatible endpoint when configured with its
+provider, endpoint, model and key. No OpenAI subscription or paid API credit
+is required. The application does not configure a paid-provider fallback.
+
+OpenRouter's current published limit for free-model requests is 50 requests
+per day without purchased credits (checked 2026-10-07). Limits, model
+availability, latency and output can change. A free API key/account is still
+needed to call the provider; no claim of unlimited free inference is made.
+References: [OpenRouter free router](https://openrouter.ai/docs/guides/routing/routers/free-router)
+and [rate-limit FAQ](https://openrouter.ai/docs/faq#how-are-rate-limits-calculated).
+
+### Scoring and fallback
+
+```
+configured LLM returns valid score → use LLM score
+missing key / provider error / timeout / invalid output → existing heuristic
+LLM and heuristic both fail → score = NULL
+```
+
+- The LLM receives only `source`, `company` and `message`; it does not receive
+  lead name or email. Those three fields leave the server for the configured
+  provider. The free-text message may itself contain personal or sensitive
+  data; callers should not submit that content to a free third-party provider.
+  Provider-specific data-use and retention terms apply; this path is for
+  demo/portfolio use, not a promise of enterprise privacy or suitability for
+  sensitive/regulated leads.
+- Provider output must be a complete JSON object with a `score` that is an
+  actual JSON integer from `0` through `100`, inclusive. Strings, booleans,
+  floating-point values (including integral-looking floats), NaN/infinity,
+  missing/duplicate score keys, prose, malformed JSON and out-of-range values
+  are rejected. A missing or unusable reason does not invalidate a valid
+  score; a generic reason is supplied.
+- A failed or unusable LLM response falls back to the existing deterministic
+  heuristic without changing its formula. If the heuristic also fails, intake
+  still returns HTTP `201` with `score`, `score_reason` and `scored_at` null.
+- No score provenance or provider diagnostics are added to the public API.
+  The response fields and shapes remain unchanged. n8n still applies its
+  existing `70` qualification threshold: integer scores route as before, and
+  `score = null` routes to `manual_review`. No scoring or threshold logic is
+  added to n8n.
+
+### Tests and scope
+
+Automated tests mock provider responses and remain offline. They cover LLM
+success, provider error/timeout, malformed and boundary scores, heuristic
+fallback, absent credentials and both scorers failing. No live provider calls
+belong in the normal test suite. Provider/model quality and the `70` threshold
+are not validated statistically; no accuracy or superiority claim is made.

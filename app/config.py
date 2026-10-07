@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,10 +11,10 @@ class Settings(BaseSettings):
 
     database_url: str
 
-    # Optional AI lead scoring (Milestone 3). Never printed or exposed.
-    openai_api_key: str | None = None
-    openai_base_url: str | None = None
-    lead_scoring_model: str = "gpt-4o-mini"
+    llm_provider: Literal["openrouter", "openai-compatible"] = "openrouter"
+    llm_api_key: str | None = None
+    llm_base_url: str | None = None
+    llm_model: str = "openrouter/free"
 
 
 @lru_cache

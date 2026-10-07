@@ -1,24 +1,24 @@
-"""AI lead scoring (Milestone 3).
+"""LLM and deterministic fallback lead scoring.
 
-Provider-specific code lives only in this module. Every AI-layer failure —
-missing API key, timeout, HTTP error, malformed reply — degrades to ``None``
-so that intake never fails because of scoring. The API key is never printed,
-logged, or returned by any endpoint.
+Provider requests and fallback orchestration live only in this module. A
+missing key, provider error, or unusable reply falls back to the local
+heuristic scorer. The API key is never printed, logged, or returned.
 
 Database errors are the database layer's concern and are never caught here.
 """
 
+import json
+import logging
 import re
 from typing import Callable
 
 import httpx
-from pydantic import ValidationError
 
 from app.config import get_settings
 from app.models import LeadCreate, ScoringResult
 
 SCORING_TIMEOUT_SECONDS = 5.0
-DEFAULT_BASE_URL = "https://api.openai.com/v1"
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a B2B lead scoring assistant. Score how likely the lead is a "
@@ -37,13 +37,33 @@ def build_user_message(lead: LeadCreate) -> str:
 
 
 def parse_scoring_reply(content: object) -> ScoringResult | None:
-    """Parse the model's reply; anything invalid becomes None."""
+    """Accept only a JSON object with an integer score in the inclusive range."""
     if not isinstance(content, str):
         return None
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
     try:
-        return ScoringResult.model_validate_json(content)
-    except ValidationError:
+        payload = json.loads(content, object_pairs_hook=unique_object)
+    except (json.JSONDecodeError, TypeError, ValueError):
         return None
+    if not isinstance(payload, dict):
+        return None
+
+    score = payload.get("score")
+    if type(score) is not int or not 0 <= score <= 100:
+        return None
+
+    reason = payload.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        reason = "LLM lead score"
+    return ScoringResult(score=score, reason=reason.strip()[:MAX_REASON_LENGTH])
 
 
 # --- Offline heuristic scorer (Milestone 4) ---------------------------------
@@ -136,29 +156,49 @@ def score_lead_heuristic(lead: LeadCreate) -> ScoringResult:
 
 
 def score(lead: LeadCreate) -> ScoringResult | None:
-    """Dispatcher: LLM scorer when a key is configured, heuristic otherwise.
+    """Use the configured LLM when possible, then fall back locally."""
+    try:
+        llm_configured = bool(get_settings().llm_api_key)
+    except Exception:
+        llm_configured = False
+        logger.warning("LLM configuration is invalid; using heuristic fallback")
 
-    An LLM failure with a key set stays None (no heuristic fallback), as
-    specified in Milestone 4.
-    """
-    if get_settings().openai_api_key:
-        return score_lead(lead)
-    return score_lead_heuristic(lead)
+    if llm_configured:
+        try:
+            result = score_lead(lead)
+        except Exception:
+            result = None
+        if result is not None:
+            return result
+        logger.warning(
+            "LLM scoring failed or returned an invalid score; using heuristic"
+        )
+
+    try:
+        return score_lead_heuristic(lead)
+    except Exception:
+        logger.exception("Heuristic lead scoring failed")
+        return None
 
 
 def score_lead(lead: LeadCreate) -> ScoringResult | None:
-    """Score one lead. Returns None whenever scoring cannot be completed."""
+    """Request one score using the configured OpenAI-compatible endpoint."""
     settings = get_settings()
-    api_key = settings.openai_api_key
+    api_key = settings.llm_api_key
     if not api_key:
         return None
-    base_url = (settings.openai_base_url or DEFAULT_BASE_URL).rstrip("/")
+    default_base_url = (
+        "https://openrouter.ai/api/v1"
+        if settings.llm_provider == "openrouter"
+        else "https://api.openai.com/v1"
+    )
+    base_url = (settings.llm_base_url or default_base_url).rstrip("/")
     try:
         response = httpx.post(
             f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
-                "model": settings.lead_scoring_model,
+                "model": settings.llm_model,
                 "temperature": 0,
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},

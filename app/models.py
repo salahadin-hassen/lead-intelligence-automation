@@ -46,7 +46,7 @@ class LeadListResponse(BaseModel):
 class ScoringResult(BaseModel):
     """Strict shape expected from the lead-scoring model reply."""
 
-    score: int = Field(ge=0, le=100)
+    score: int = Field(strict=True, ge=0, le=100)
     reason: str = Field(min_length=1)
 
 

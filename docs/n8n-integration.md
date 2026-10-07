@@ -24,6 +24,11 @@ one. The Telegram message is a human-readable **rendering** of the operational
 record, never a substitute for it: the structured record stays authoritative
 in the execution data alongside the message.
 
+Current scoring behavior (Milestone 14): a configured LLM failure falls back
+to FastAPI's deterministic heuristic. A `null` score is returned only when
+both scoring mechanisms fail; the unchanged n8n qualification path sends that
+lead to `manual_review`.
+
 ## Flow
 
 ```
