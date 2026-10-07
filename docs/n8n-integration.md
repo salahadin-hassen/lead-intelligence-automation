@@ -1,4 +1,4 @@
-# n8n ↔ FastAPI integration (Milestones 7–10)
+# n8n ↔ FastAPI integration (Milestones 7–11)
 
 This document describes the automation boundary between **n8n** and the
 FastAPI lead API: one importable workflow, `n8n/lead-intake.json`, that accepts
@@ -10,7 +10,10 @@ records each decision as a structured operational event an operator can
 inspect in the execution data (Milestone 9). Milestone 10 then delivers the
 two records a human must act on — `qualified` and `manual_review` — as real
 Telegram messages to one configured chat, without touching the
-caller-response isolation Milestone 9 established.
+caller-response isolation Milestone 9 established. Milestone 11 adds a local
+single-file contact form (`demo/lead-form.html`) that feeds this exact
+webhook as a real lead source — browser → n8n → FastAPI — changing no
+backend contract.
 
 n8n orchestrates. FastAPI decides. Nothing about validation, persistence,
 duplicate detection or scoring is duplicated in n8n: the workflow *reads* the
@@ -22,7 +25,7 @@ in the execution data alongside the message.
 ## Flow
 
 ```
-External lead source
+Lead form (demo/lead-form.html) · curl · any other client
         │  POST /webhook/lead-intake  (JSON body)
         ▼
   Lead Webhook            (n8n-nodes-base.webhook, responseMode: responseNode)
@@ -534,6 +537,124 @@ real message); the faulted version was in effect 139 s later (execution 16).
 Wait for the new publication to settle (or verify the active version) before
 testing a freshly reloaded workflow.
 
+## Demo lead form (Milestone 11)
+
+```
+Demo lead form          (demo/lead-form.html, plain HTML/CSS/JS)
+      │  fetch() POST JSON  — direct, CORS preflight answered by n8n
+      ▼
+n8n webhook             (POST /webhook/lead-intake, unchanged workflow)
+      ▼
+FastAPI /leads          (unchanged contract)
+      ▼
+PostgreSQL + scoring → qualification → audit → Telegram
+```
+
+### Purpose & location
+
+`demo/lead-form.html` — one self-contained file (no framework, no build step,
+no dependencies) — turns the pipeline into a client-demoable story: a
+prospective customer fills out a normal business contact form, and the
+submission travels the *same* path every other lead source takes. It is a
+**source** for the existing automation, not a second backend: no scoring,
+qualification or validation rules exist in the frontend, the backend contract
+did not change, and the workflow JSON was not touched by this milestone.
+
+The form collects exactly the contract fields `name`, `email`, `company`,
+`message` (plus the workflow-injected `source`); `external_id` is generated,
+not asked for (see below).
+
+### Running it
+
+```bash
+# prerequisites: PostgreSQL, FastAPI on :8000, n8n on :5679 with the
+# workflow published (the same services this document describes)
+python3 -m http.server 8001 --directory demo
+# open http://localhost:8001/lead-form.html
+```
+
+Any static file server works; `python3 -m http.server` was chosen because it
+is Python-standard-library and dependency-free. The page is **not deployed
+anywhere** — it is a local demo artifact.
+
+### Configuration
+
+The webhook URL lives in exactly **one** place: the `CONFIG` object at the
+top of the `<script>` block in `demo/lead-form.html`.
+
+```js
+const CONFIG = {
+  webhookUrl: "http://localhost:5679/webhook/lead-intake", // this machine's n8n
+  source: "website-contact-form",
+};
+```
+
+- The URL appears nowhere else in the file; point it at a different n8n by
+  editing that one line.
+- `source` reuses the value the repository's API tests already send
+  (`website-contact-form`) instead of inventing new vocabulary. It is not a
+  user-editable field; the backend receives it as data on every submission.
+- No credentials of any kind are embedded (the n8n webhook is unauthenticated
+  exactly as before — M11 deliberately adds no webhook auth).
+
+### CORS decision: direct browser → n8n (no proxy)
+
+Tested against the running n8n **2.41.7** instance before any code was
+written, not guessed:
+
+| Probe | Result |
+|---|---|
+| `OPTIONS /webhook/lead-intake` with `Origin` + `Access-Control-Request-*` | `204`, `Access-Control-Allow-Methods: OPTIONS, POST`, `Access-Control-Allow-Origin: <origin>` (reflected), `Access-Control-Allow-Headers: content-type`, `Access-Control-Max-Age: 300` |
+| `POST` with `Origin` | response carries `Access-Control-Allow-Origin: <origin>` |
+
+The webhook answers cross-origin requests out of the box, so the form uses a
+plain `fetch()` **directly against n8n**. No proxy exists anywhere in this
+milestone: no `demo/` server beyond a static file server, no second backend,
+no FastAPI exposure, no n8n CORS settings changed. (Had a proxy been needed,
+it would have been documented here as a local-only transport adapter.)
+
+### Response handling
+
+The UI maps the workflow's real envelope — it never shows a blanket
+"Success!" for any 2xx:
+
+| Workflow response | Form state |
+|---|---|
+| `201 {"outcome":"created"}` | Success panel: *"Thanks. Your message has been received."* — no score/threshold/internal detail shown |
+| `409 {"outcome":"duplicate"}` | Duplicate panel: *"We already have this message."* |
+| `422 {"outcome":"validation_failed"}` | Friendly per-field errors derived from the response's field **names** only (`email` → *"Please enter a valid email address."*, other known fields → *"Please check this field."*, unknown → generic banner). Raw server text is never rendered |
+| `502 {"outcome":"upstream_error"}`, network failure, or any unexpected response | Banner: *"We couldn't submit your request right now. Please try again."* — form values retained, no stack traces, no n8n/FastAPI internals (details may go to `console` in passing, never into the page) |
+
+Client-side validation (required fields, email format) blocks obviously
+invalid submissions before any request, with inline errors, `aria-invalid`,
+focus moved to the first invalid field — while FastAPI's validation remains
+the authority (verified: a browser-accepted but API-rejected email still got
+the real `422`).
+
+### `external_id` & duplicate demos
+
+Normal submissions generate one `crypto.randomUUID()` per message, kept
+across retries of that message and rotated after success. Purpose: an
+accidental double-submit or retry cannot create a second row — the retry
+re-uses the id and the server's `(source, external_id)` rule answers `409`
+if the first attempt landed. This is browser-level convenience and is
+**not** claimed as a globally unique identifier (collisions across sessions
+are theoretically possible; irrelevant for a demo). The server's duplicate
+semantics remain the only authority.
+
+For deliberate duplicate demonstrations open
+`lead-form.html?external_id=<fixed-id>` — the id is then pinned, so
+submitting the same content twice renders the duplicate state. This is the
+milestone's only "developer" affordance: it is hidden in the URL, harmless to
+ordinary users, and exposes nothing internal.
+
+### What the form must never reveal
+
+No scoring formula, threshold, heuristic details, AI/OpenAI configuration,
+database or n8n internals, execution IDs, Telegram details or stack traces
+are rendered anywhere in the page; qualification happens entirely downstream.
+Success means exactly *"Thanks. Your message has been received."*
+
 ## Importing and activating
 
 ```bash
@@ -579,8 +700,9 @@ Two n8n 2.x port facts worth knowing (both hit while testing this workflow):
 ## Scope
 
 In scope: this single intake workflow (intake + qualification routing +
-operational/audit records + Telegram delivery of the two actionable records)
-and the boundary it defines.
+operational/audit records + Telegram delivery of the two actionable records),
+the local demo lead form that feeds its webhook (Milestone 11), and the
+boundary they define.
 
 Out of scope for these milestones (later work): any delivery channel besides
 the single-destination Telegram send of Milestone 10 (email/Slack/CRM/
@@ -588,9 +710,46 @@ webhook-out — Telegram was deliberately the first and only channel),
 recipient lookup or multi-tenant/multi-channel notifications, persisting the
 audit event (no table, no endpoint — that is deliberate), enrichment,
 scheduled follow-ups, retries and queues, authentication, rate limiting,
-Docker, additional workflows.
+Docker, additional workflows. A deployed/public frontend, accounts and any
+production hosting of the demo form are out of scope as well: the form is a
+local demo artifact served by a throwaway static server.
 
 ## Verification
+
+### Milestone 11 — run personally in a real browser against the live stack
+
+Environment: the form served from `python3 -m http.server 8001 --directory
+demo`, driven by **headless Chrome over the DevTools protocol** — real
+`HTMLInputElement` value setting, a real click on the real Submit button,
+real `fetch()` preflights, and screenshots of every state (desktop
+1280×900 and a 390×844 mobile viewport). Every request below was observed
+in Chrome's network log (proving the browser hit **n8n**, never FastAPI
+directly), and every outcome was read from n8n's persisted execution data
+plus the PostgreSQL rows afterwards. n8n `2.41.7`, FastAPI on `:8000`
+(heuristic scoring except case 3), workflow unchanged from M10.
+
+| # | Scenario (through the actual form UI) | Expected | Observed |
+|---|---|---|---|
+| 1 | Qualified: corporate email, long intent-rich message (pricing/enterprise/api/demo/trial) | Browser → n8n `201`, row + score, `qualified`, Telegram delivered | Network: `OPTIONS → 204`, `POST /webhook/lead-intake → 201` (only host contacted), console `[lead-form] response: 201 created`, success panel focused. exec 19: order `… Respond Created (…187) → … Log Priority Route (…271) → Build Audit Event (…286) → Build Qualified Notification (…300) → Send Qualified to Telegram (…319)`; record `score: 100`, `qualification: "qualified"`; Telegram `ok:true`, **`message_id: 11`**, text `🔥 HIGH-PRIORITY LEAD … Northwind Logistics … Score: 100 … website-contact-form`. Row #1 `score=100` |
+| 2 | Not-qualified: short message + free-mail domain (source still `website-contact-form`) | `201`, success panel, not-qualified branch, **no** Telegram | Network `POST → 201`, success panel. exec 20: path `… Respond Created → … Log Normal Route → Build Audit Event`, `score: 28`, `qualification: "not_qualified"`, **0 Telegram nodes**. Row #2 `score=28` |
+| 3 | Manual review: FastAPI restarted with bogus `OPENAI_API_KEY` + dead `OPENAI_BASE_URL` | `201`, success panel, `score: null`, manual-review Telegram | Network `POST → 201`, success panel. exec 24: `score: null` end-to-end (never `0`), `qualification: "manual_review"`, audit (…399) → build (…410) → send (…424); Telegram `ok:true`, **`message_id: 12`**, text `⚠️ LEAD NEEDS MANUAL REVIEW … Score: unavailable …`. Row #5 `score=NULL`. FastAPI restarted in heuristic mode afterwards |
+| 4 | Duplicate: `?external_id=m11-dup-001` pinned, same content submitted twice (via the form's reset → re-fill → submit) | first `201` + success, second `409` + duplicate state, exactly one row | Network: `POST → 201` then `POST → 409`, both carrying `external_id: m11-dup-001`; console `201 created` / `409 duplicate`; duplicate panel shown. exec 23 stops at `Respond Duplicate` (5 nodes, no qualification, 0 Telegram). Exactly **one** row #3 |
+| 5a | Invalid, client side: Submit clicked with all fields empty | Inline errors, no request leaves the browser | 4 field errors rendered (`name/email/company: This field is required.`, `message: Please tell us how we can help.`), focus moved to Name, **0 network requests** |
+| 5b | Invalid, server side: `casey@example` (HTML5-valid, API-invalid) | Real `422`, friendly field error, no row, no Telegram | Network `POST → 422` (browser accepted what the API rejected → server stays authoritative), console `422 validation_failed`, email field error *"Please enter a valid email address."*, no success panel. exec 21 stops at `Respond Validation Failed`; **no row** (table total unaffected) |
+| 6 | FastAPI stopped, valid submission | Form error state, `502`, no row, no Telegram | Network `POST → 502`, console `502 upstream_error`, banner *"We couldn't submit your request right now. Please try again."* with all values retained and the button re-enabled. exec 25 stops at `Respond Upstream Error`, **0 Telegram nodes**; **no row**. FastAPI restarted healthy afterwards |
+
+Also personally verified: the final committed file re-run end to end after
+its last edit (empty-submit block → `201` success, `outline: none` on the
+programmatically focused panel, `activeElement` = success panel); mobile
+390×844 render with **no horizontal overflow** (`scrollWidth ==
+clientWidth == 390`), 16 px inputs (no iOS zoom), 50 px submit button;
+visual review of all six states (initial form, field errors, success,
+duplicate, upstream banner, mobile); JS syntax (`node --check` on the
+extracted script) and tag-balance checks; form fields ↔ contract field
+parity (`name`, `email`, `company`, `message`, `source` — no extra fields,
+no direct-to-FastAPI call anywhere); hygiene scan of the diff (no token, no
+chat id, no DSN, no machine path, no credential of any kind); `pytest -q`
+→ **83 passed** (backend untouched).
 
 ### Milestone 10 — run personally against a live n8n instance
 

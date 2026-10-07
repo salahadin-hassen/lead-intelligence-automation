@@ -756,8 +756,84 @@ beyond the Bot API response persisted in the execution data, notification
 rules or preferences, persisting audit events, altering FastAPI (no contract
 gap was found), plus everything excluded in the preceding milestones.
 
+## Milestone 11: Demo Lead Form
+
+A single-file, framework-free contact form — `demo/lead-form.html` — that
+acts as a real lead source for the existing automation: a prospective
+customer fills it out and the submission travels the untouched path
+**browser → n8n webhook → FastAPI → PostgreSQL + scoring → qualification →
+audit → Telegram**. The form is a source, not a second backend: no scoring,
+threshold or validation logic exists in the frontend, the backend contract
+is unchanged (backend changes: none), and the workflow JSON was not touched
+by this milestone. Full reference (run instructions, CORS evidence,
+response-state mapping, verification table):
+[`docs/n8n-integration.md`](n8n-integration.md).
+
+### Design
+
+- **Fields:** exactly the API contract — `name`, `email`, `company`,
+  `message` — plus `source: website-contact-form` (the vocabulary the API
+  tests already use), injected from one `CONFIG` block that also holds the
+  single webhook URL (`http://localhost:5679/webhook/lead-intake` for this
+  machine's n8n). No unsupported fields, no credentials, one configuration
+  location, nothing scattered through the HTML.
+- **Direct browser → n8n, no proxy:** n8n 2.41.7 answers the form's CORS
+  preflight (`OPTIONS → 204` with reflected `Access-Control-Allow-*`) and
+  returns `Access-Control-Allow-Origin` on the webhook response — tested
+  against the running instance before implementation, so a plain
+  cross-origin `fetch()` is used and neither a proxy nor an architecture
+  change was needed.
+- **Real response contract, not blanket success:** `201 created` → success
+  panel ("Thanks. Your message has been received."); `409 duplicate` →
+  duplicate state ("We already have this message."); `422
+  validation_failed` → friendly per-field errors derived from field *names*
+  only (raw server text never rendered); `502 upstream_error`, network
+  failure or any unexpected response → a generic "We couldn't submit your
+  request right now. Please try again." banner with the form's values
+  retained. No scores, thresholds, execution IDs, workflow/database
+  internals or stack traces are ever shown to the person submitting.
+- **`external_id`:** browser-generated (`crypto.randomUUID()`), one id per
+  message, kept across retries of that message and rotated after success —
+  so an accidental retry cannot create a second row. Explicitly *not* a
+  global-uniqueness claim; the server's `(source, external_id)` duplicate
+  rule stays authoritative. `?external_id=<fixed-id>` pins the id for
+  deliberate duplicate demonstrations — the milestone's only developer
+  affordance, hidden in the URL and exposing nothing internal.
+- **UX:** real business-form presentation (labels, required indicators,
+  placeholders), inline validation with `aria-invalid` and focus
+  management, disabled button + spinner while submitting, distinct
+  success/validation/duplicate/upstream states, mobile-friendly layout
+  (390 px viewport: no horizontal overflow, 16 px inputs, 50 px button).
+
+### Tests / validation (Milestone 11)
+
+1. Existing suites stay green (**83 tests**) — backend changes: **none**.
+2. JS syntax (`node --check` on the extracted script) and HTML tag-balance
+   checks; form fields audited against the FastAPI `LeadCreate` contract
+   (no unsupported fields; the page contains no direct FastAPI call).
+3. **Six scenarios driven through the real form in headless Chrome** (real
+   value entry, real Submit click, requests observed in the browser's own
+   network log — always `localhost:5679/webhook/lead-intake`, never
+   FastAPI): qualified (Telegram delivery observed, `message_id: 11`),
+   not-qualified (201, no send), manual review with `score: null` after
+   restarting FastAPI unscored (Telegram delivery observed,
+   `message_id: 12`), duplicate pinned id → `409` with exactly one row,
+   invalid → client-side block (0 requests) plus an authoritative `422`
+   (no row), FastAPI stopped → `502` (no row, no send). Every outcome read
+   from n8n's persisted execution data and the database afterwards;
+   scenario table: [`docs/n8n-integration.md`](n8n-integration.md).
+
+### Out of scope for Milestone 11
+
+User authentication, accounts, dashboards, lead lists, admin panels, a
+production or hosted frontend, frontend frameworks/build tooling, webhook
+authentication (none exists today), any backend or workflow change (none
+was needed), plus everything excluded in the preceding milestones.
+
 ## Out of scope
 
-n8n beyond the single lead-intake workflow of Milestones 7–10, CRM,
-authentication, Docker, background workers, unrelated features.
+n8n beyond the single lead-intake workflow of Milestones 7–11, CRM,
+authentication, Docker, background workers, a production frontend or
+hosting (the Milestone 11 form is a local demo artifact), unrelated
+features.
 (AI is in scope via the Milestone 3 spec above.)

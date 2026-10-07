@@ -30,6 +30,10 @@ missing.
   routes created leads (qualified / not-qualified / manual review) by the
   score FastAPI returned, and records each decision as a structured
   operational event with a human-readable summary in the execution data.
+- **Demo lead form** — a single-file, framework-free contact form
+  (`demo/lead-form.html`) acting as a real lead source: it submits through
+  the n8n webhook like any other caller and maps the workflow's actual
+  response envelope to success / validation / duplicate / upstream states.
 
 ## Architecture
 
@@ -194,6 +198,8 @@ receives an external lead over a webhook, hands it to this API, and routes the
 created lead by its score.
 
 ```
+Demo lead form (demo/lead-form.html in a browser)
+  ── fetch() POST JSON ──────────────────────────────────────────────►
 Webhook (POST /webhook/lead-intake)
   → Prepare Lead Payload   single config block (API base URL + qualification
                            threshold, env var or documented default), map the
@@ -285,6 +291,58 @@ executed live with outcomes read from n8n's persisted execution data, plus
 `pytest` (83 passing). Details and the exact scenario tables:
 [`docs/n8n-integration.md`](docs/n8n-integration.md).
 
+## Demo lead form
+
+`demo/lead-form.html` is a single-file, framework-free contact form — the
+human lead source for the workflow above. It exists to make the pipeline
+demoable end to end, not as a product frontend.
+
+```bash
+# prerequisites: PostgreSQL, FastAPI on :8000, n8n on :5679 with the
+# workflow published (same services as the n8n section above)
+python3 -m http.server 8001 --directory demo
+# open http://localhost:8001/lead-form.html
+```
+
+- **One configuration point:** `CONFIG` at the top of the `<script>` block in
+  `demo/lead-form.html` — `webhookUrl` (default
+  `http://localhost:5679/webhook/lead-intake`, this machine's n8n; change it
+  there if n8n lives elsewhere) and `source`
+  (`website-contact-form`, the vocabulary the API tests already use). The URL
+  appears nowhere else in the file.
+- **Request path:** browser → n8n `POST /webhook/lead-intake` → FastAPI
+  `POST /leads` → PostgreSQL + scoring → qualification → audit → Telegram.
+  The form never calls FastAPI directly, contains no scoring or qualification
+  logic, and exposes no scores or internals to the person filling it in.
+- **CORS: direct browser → n8n, no proxy.** n8n 2.41.7 answers the form's
+  preflight (`OPTIONS` → `204` with reflected `Access-Control-Allow-*` headers)
+  and returns `Access-Control-Allow-Origin` on the webhook response, so a
+  plain cross-origin `fetch()` works as-is; no proxy or backend change was
+  needed.
+- **States come from the workflow's real envelope:** `201 created` → success
+  panel ("Thanks. Your message has been received."), `409 duplicate` → "we
+  already have this message", `422 validation_failed` → friendly per-field
+  errors (server field *names* only — no raw server text), `502
+  upstream_error` or network failure → "We couldn't submit your request right
+  now. Please try again." Nothing about scores, thresholds, execution IDs or
+  stack traces is ever shown.
+- **`external_id`:** generated in the browser per message
+  (`crypto.randomUUID()`, reused across retries of that message, rotated after
+  success) so an accidental double-submit cannot create a second row — demo
+  convenience, explicitly *not* a global-uniqueness guarantee. For duplicate
+  demos open `lead-form.html?external_id=<fixed-id>` and submit twice: the
+  second attempt renders the duplicate state, while the server keeps owning
+  the `(source, external_id)` rule.
+- **Not deployed anywhere.** It is a local page from a throwaway
+  `python3 -m http.server` — no build step, no dependencies, no credentials,
+  no auth; suited to demos on this machine only.
+
+Personally verified end to end from a real browser (headless Chrome driving
+the actual form): qualified → Telegram `message_id: 11`, not-qualified → no
+send, unscored → manual-review `message_id: 12`, duplicate → 409, invalid →
+client-side block plus an authoritative 422, FastAPI stopped → 502 with no
+row and no notification.
+
 ## Configuration
 
 Read from the environment or `.env` (`.env` is gitignored; `.env.example` is
@@ -340,6 +398,7 @@ app/
   errors.py          application-level exceptions
 sql/                 001–004 idempotent migrations
 n8n/lead-intake.json importable webhook → POST /leads → routing + audit records
+demo/lead-form.html  single-file demo contact form → n8n webhook (local only)
 tests/               83 integration + unit tests
 docs/requirements.md source of truth for project scope
 docs/n8n-integration.md  the n8n contract and operating guide
@@ -362,11 +421,13 @@ docs/n8n-integration.md  the n8n contract and operating guide
 deletion, health — as specified in [`docs/requirements.md`](docs/requirements.md)
 (Milestones 1–6), plus a hardening pass (indexes, health probe, docs), the
 n8n intake workflow (Milestone 7), its qualification routing (Milestone 8),
-the operational/audit layer (Milestone 9) and Telegram notifications for the
-two actionable outcomes (Milestone 10).
+the operational/audit layer (Milestone 9), Telegram notifications for the
+two actionable outcomes (Milestone 10) and a local demo lead form that feeds
+the same webhook (Milestone 11).
 
 **Deliberately out of scope:** authentication, rate limiting, Docker, CRM,
-background workers, frontend, email/Slack and any notification channel or
+background workers, a production frontend (the `demo/` form is local-only),
+email/Slack and any notification channel or
 destination beyond the single configured Telegram chat, status
 transition-graph enforcement, retries/queues, multi-workflow automation. The
 service is not exposed publicly in its current form.

@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talk to our team</title>
+<style>
+  :root {
+    --ink: #1a2230;
+    --muted: #5b6472;
+    --line: #d7dce3;
+    --card: #ffffff;
+    --page: #eef1f5;
+    --accent: #1f4e79;
+    --accent-hover: #173d5f;
+    --error: #b3261e;
+    --error-bg: #fdf2f1;
+    --success: #1c6b3f;
+    --success-bg: #eef8f1;
+    --info: #1f4e79;
+    --info-bg: #eef3f9;
+    --focus: #2f6fb5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--page);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 32px 16px;
+  }
+  .card {
+    background: var(--card);
+    width: 100%;
+    max-width: 540px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 8px 28px rgba(20, 32, 54, 0.08);
+    padding: 40px;
+  }
+  header { margin-bottom: 28px; }
+  h1 {
+    font-size: 26px;
+    line-height: 1.25;
+    margin: 0 0 8px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+  .subtitle { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .field { margin-bottom: 20px; }
+  label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .req { color: var(--error); margin-left: 2px; }
+  input, textarea {
+    width: 100%;
+    font: inherit;
+    font-size: 16px;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 11px 13px;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  input::placeholder, textarea::placeholder { color: #98a1ae; }
+  input:focus, textarea:focus {
+    outline: none;
+    border-color: var(--focus);
+    box-shadow: 0 0 0 3px rgba(47, 111, 181, 0.18);
+  }
+  textarea { min-height: 120px; resize: vertical; }
+  .invalid input, .invalid textarea { border-color: var(--error); }
+  .field-error {
+    color: var(--error);
+    font-size: 13px;
+    margin: 6px 0 0;
+  }
+
+  .banner {
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 14.5px;
+    margin-bottom: 20px;
+    border: 1px solid transparent;
+  }
+  .banner.error { background: var(--error-bg); color: var(--error); border-color: #f2cfcc; }
+  .banner.duplicate { background: var(--info-bg); color: var(--info); border-color: #cfdcec; }
+  .banner:empty { display: none; }
+
+  button[type="submit"] {
+    width: 100%;
+    font: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    padding: 13px 20px;
+    cursor: pointer;
+    transition: background .15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 48px;
+  }
+  button[type="submit"]:hover:not(:disabled) { background: var(--accent-hover); }
+  button[type="submit"]:focus-visible {
+    outline: 3px solid rgba(47, 111, 181, .5);
+    outline-offset: 2px;
+  }
+  button[type="submit"]:disabled { opacity: .72; cursor: not-allowed; }
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2.5px solid rgba(255, 255, 255, .45);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: none;
+  }
+  .submitting .spinner { display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .note {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 16px 0 0;
+    text-align: center;
+  }
+
+  .outcome { text-align: center; padding: 12px 0 4px; }
+  /* Panels receive programmatic focus for screen readers (tabindex="-1");
+   * suppress the default ring, which is purely cosmetic here. */
+  .outcome:focus { outline: none; }
+  .outcome .mark {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  .outcome.success .mark { background: var(--success-bg); color: var(--success); }
+  .outcome.duplicate .mark { background: var(--info-bg); color: var(--info); }
+  .outcome h2 { font-size: 20px; margin: 0 0 8px; }
+  .outcome p { color: var(--muted); margin: 0 auto 20px; max-width: 38ch; }
+  .secondary {
+    font: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--accent);
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 18px;
+    cursor: pointer;
+    min-height: 44px;
+  }
+  .secondary:hover { background: #f4f6f9; }
+
+  [hidden] { display: none !important; }
+
+  @media (max-width: 560px) {
+    body { padding: 16px 10px; }
+    .card { padding: 26px 20px; border-radius: 12px; }
+    h1 { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<main class="card">
+  <header>
+    <h1>Talk to our team</h1>
+    <p class="subtitle">Tell us what you&rsquo;re working on and we&rsquo;ll get back to you within one business day.</p>
+  </header>
+
+  <form id="lead-form" novalidate>
+    <div id="banner" class="banner" role="alert" aria-live="assertive"></div>
+
+    <div class="field" id="field-name">
+      <label for="name">Name <span class="req" aria-hidden="true">*</span></label>
+      <input id="name" name="name" type="text" autocomplete="name"
+             placeholder="Ada Lovelace" required aria-required="true"
+             aria-describedby="name-error">
+      <p class="field-error" id="name-error" hidden></p>
+    </div>
+
+    <div class="field" id="field-email">
+      <label for="email">Work email <span class="req" aria-hidden="true">*</span></label>
+      <input id="email" name="email" type="email" autocomplete="email"
+             inputmode="email" placeholder="ada@company.com" required
+             aria-required="true" aria-describedby="email-error">
+      <p class="field-error" id="email-error" hidden></p>
+    </div>
+
+    <div class="field" id="field-company">
+      <label for="company">Company <span class="req" aria-hidden="true">*</span></label>
+      <input id="company" name="company" type="text" autocomplete="organization"
+             placeholder="Analytical Engines Ltd" required aria-required="true"
+             aria-describedby="company-error">
+      <p class="field-error" id="company-error" hidden></p>
+    </div>
+
+    <div class="field" id="field-message">
+      <label for="message">What can we help you with? <span class="req" aria-hidden="true">*</span></label>
+      <textarea id="message" name="message" rows="5" required aria-required="true"
+                aria-describedby="message-error"
+                placeholder="A few sentences about your project, timeline and what you need help with&hellip;"></textarea>
+      <p class="field-error" id="message-error" hidden></p>
+    </div>
+
+    <button type="submit" id="submit-btn">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="submit-label">Submit</span>
+    </button>
+    <p class="note">We&rsquo;ll only use your details to respond to your enquiry.</p>
+  </form>
+
+  <div id="success-panel" class="outcome success" hidden tabindex="-1">
+    <div class="mark" aria-hidden="true">&#10003;</div>
+    <h2>Thanks. Your message has been received.</h2>
+    <p>Our team will review it and get back to you shortly.</p>
+    <button type="button" class="secondary" id="success-reset">Send another message</button>
+  </div>
+
+  <div id="duplicate-panel" class="outcome duplicate" hidden tabindex="-1">
+    <div class="mark" aria-hidden="true">&#10003;</div>
+    <h2>We already have this message.</h2>
+    <p>Thanks &mdash; there&rsquo;s no need to send it again. We&rsquo;ll be in touch.</p>
+    <button type="button" class="secondary" id="duplicate-reset">Start a new message</button>
+  </div>
+</main>
+
+<script>
+/* =====================================================================
+ * Demo lead form — configuration
+ * =====================================================================
+ * The n8n production webhook URL is configured in exactly ONE place:
+ * CONFIG.webhookUrl below. Nothing else in this file hardcodes it.
+ *
+ * Flow:  Browser -> n8n webhook (POST /webhook/lead-intake)
+ *             -> FastAPI /leads -> PostgreSQL + scoring
+ *             -> qualification -> audit -> Telegram
+ * The form never calls FastAPI directly.
+ *
+ * Developer/duplicate testing: open the page with ?ext=<id> to pin the
+ * client-generated external_id, e.g. ?ext=demo-dup-1. Submitting twice
+ * with the same content then demonstrates the duplicate (409) response.
+ * The external_id is otherwise generated per message in the browser with
+ * crypto.randomUUID() so an accidental retry of the same message does not
+ * create a second row; it is NOT a claim of global uniqueness.
+ * ===================================================================== */
+const CONFIG = {
+  webhookUrl: "http://localhost:5679/webhook/lead-intake",
+  source: "website-contact-form",
+};
+
+/* Optional developer pin for duplicate demonstrations (documented in README). */
+const DEV_EXTERNAL_ID = new URLSearchParams(window.location.search).get("external_id");
+
+const form = document.getElementById("lead-form");
+const banner = document.getElementById("banner");
+const submitBtn = document.getElementById("submit-btn");
+const submitLabel = document.getElementById("submit-label");
+
+const FIELDS = ["name", "email", "company", "message"];
+
+/* external_id of the message currently being submitted: kept across retries
+ * (a retry of the same message must reuse it), cleared once delivered. */
+let currentExternalId = null;
+
+function mintExternalId() {
+  if (DEV_EXTERNAL_ID) return DEV_EXTERNAL_ID;
+  if (window.crypto && typeof window.crypto.randomUUID === "function") {
+    return window.crypto.randomUUID();
+  }
+  /* Fallback for non-secure contexts: timestamp + random, demo-grade only. */
+  return "demo-" + Date.now().toString(36) + "-" +
+         Math.random().toString(36).slice(2, 12);
+}
+
+function setFieldError(fieldName, message) {
+  const wrap = document.getElementById("field-" + fieldName);
+  const input = document.getElementById(fieldName);
+  const errorEl = document.getElementById(fieldName + "-error");
+  if (message) {
+    wrap.classList.add("invalid");
+    input.setAttribute("aria-invalid", "true");
+    errorEl.textContent = message;
+    errorEl.hidden = false;
+  } else {
+    wrap.classList.remove("invalid");
+    input.removeAttribute("aria-invalid");
+    errorEl.textContent = "";
+    errorEl.hidden = true;
+  }
+}
+
+function clearAllErrors() {
+  banner.textContent = "";
+  banner.classList.remove("error", "duplicate");
+  FIELDS.forEach((f) => setFieldError(f, null));
+}
+
+function validateForm() {
+  let firstInvalid = null;
+  FIELDS.forEach((f) => {
+    const el = document.getElementById(f);
+    const value = el.value.trim();
+    let error = "";
+    if (!value) {
+      error = f === "message"
+        ? "Please tell us how we can help."
+        : "This field is required.";
+    } else if (f === "email" && !el.validity.valid) {
+      error = "Please enter a valid email address.";
+    }
+    setFieldError(f, error);
+    if (error && !firstInvalid) firstInvalid = el;
+  });
+  if (firstInvalid) firstInvalid.focus();
+  return !firstInvalid;
+}
+
+/* Map FastAPI's validation detail to friendly per-field messages.
+ * Only field names are used — no raw server text reaches the user. */
+function renderValidationErrors(detail) {
+  let any = false;
+  if (Array.isArray(detail)) {
+    detail.forEach((err) => {
+      const field = Array.isArray(err.loc) ? err.loc[err.loc.length - 1] : null;
+      if (field && FIELDS.includes(field)) {
+        setFieldError(field, field === "email"
+          ? "Please enter a valid email address."
+          : "Please check this field.");
+        any = true;
+      }
+    });
+  }
+  if (!any) banner.textContent = "Please check the highlighted fields and try again.";
+  banner.classList.add("error");
+}
+
+function showPanel(panel) {
+  form.hidden = true;
+  panel.hidden = false;
+  panel.focus();
+}
+
+function resetToForm() {
+  clearAllErrors();
+  form.reset();
+  currentExternalId = null;
+  document.querySelectorAll(".outcome").forEach((p) => { p.hidden = true; });
+  form.hidden = false;
+  document.getElementById("name").focus();
+}
+
+function setSubmitting(isSubmitting) {
+  submitBtn.disabled = isSubmitting;
+  form.classList.toggle("submitting", isSubmitting);
+  submitLabel.textContent = isSubmitting ? "Submitting\u2026" : "Submit";
+}
+
+async function handleSubmit(event) {
+  event.preventDefault();
+  clearAllErrors();
+  if (!validateForm()) return;
+
+  const payload = {
+    name: document.getElementById("name").value.trim(),
+    email: document.getElementById("email").value.trim(),
+    company: document.getElementById("company").value.trim(),
+    message: document.getElementById("message").value.trim(),
+    source: CONFIG.source,
+    external_id: (currentExternalId = currentExternalId || mintExternalId()),
+  };
+
+  setSubmitting(true);
+  let res;
+  try {
+    res = await fetch(CONFIG.webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    /* Network failure talking to n8n: keep the external_id so a retry of
+     * this same message cannot create a second row if it landed. */
+    setSubmitting(false);
+    console.warn("[lead-form] network error reaching the webhook:", err);
+    banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
+    banner.classList.add("error");
+    return;
+  }
+
+  let data = null;
+  try { data = await res.json(); } catch (err) { /* non-JSON response */ }
+  setSubmitting(false);
+  console.log("[lead-form] response:", res.status, data && data.outcome);
+
+  if (res.ok && data && data.outcome === "created") {
+    currentExternalId = null;
+    showPanel(document.getElementById("success-panel"));
+  } else if (res.status === 409 || (data && data.outcome === "duplicate")) {
+    currentExternalId = null;
+    showPanel(document.getElementById("duplicate-panel"));
+  } else if (res.status === 422 || (data && data.outcome === "validation_failed")) {
+    renderValidationErrors(data && data.detail);
+    document.getElementById("name").focus();
+  } else if (res.status === 502 || (data && data.outcome === "upstream_error")) {
+    banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
+    banner.classList.add("error");
+  } else {
+    console.warn("[lead-form] unexpected response:", res.status, data);
+    banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
+    banner.classList.add("error");
+  }
+}
+
+form.addEventListener("submit", handleSubmit);
+document.getElementById("success-reset").addEventListener("click", resetToForm);
+document.getElementById("duplicate-reset").addEventListener("click", resetToForm);
+</script>
+</body>
+</html>
