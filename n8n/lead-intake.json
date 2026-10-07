@@ -397,6 +397,88 @@
         1920,
         -480
       ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Telegram message for a qualified lead (Milestone 10). The text is mapped\n// from the operational record that \"Log Priority Route\" emitted - real\n// workflow fields only, never invented (no fabricated score, company,\n// source or lead ID). The destination chat comes from the TELEGRAM_CHAT_ID\n// environment variable of the n8n process; the bot token is NOT read here -\n// it lives in n8n's credential store and is referenced by the Telegram node.\nconst record = $input.first().json || {};\n\nlet chatId = null;\ntry {\n  const raw = $env.TELEGRAM_CHAT_ID;\n  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {\n    chatId = String(raw).trim();\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE): surfaced by the check below.\n}\nif (chatId === null) {\n  throw new Error('TELEGRAM_CHAT_ID is not configured on the n8n process (set it, and N8N_BLOCK_ENV_ACCESS_IN_NODE=false to allow $env)');\n}\n\n// The Telegram node sends with parse_mode HTML, so &, < and > in real lead\n// data (company names, reasons) must be escaped - Telegram would otherwise\n// reject the message. Escaping does not change what a human sees.\nconst esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst message = [\n  '\\u{1F525} HIGH-PRIORITY LEAD',\n  '',\n  `Company: ${esc(record.company)}`,\n  `Lead ID: ${esc(record.leadId)}`,\n  `Score: ${esc(record.score)}`,\n  `Qualification: ${esc(record.qualification)}`,\n  `Source: ${esc(record.source)}`,\n  '',\n  'Action: Review and contact this lead.',\n].join('\\n');\n\nreturn [{ json: { ...record, chatId, telegramMessage: message } }];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000016",
+      "name": "Build Qualified Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.telegramMessage }}",
+        "replyMarkup": "none",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-lead-alerts",
+          "name": "Telegram Lead Alerts"
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000017",
+      "name": "Send Qualified to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2160,
+        -400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Telegram message for a lead that needs human review (Milestone 10):\n// FastAPI could not score it (score stays null) or the qualification state\n// could not be determined. Mapped from the operational record of\n// \"Log Manual Review\" - a null score is displayed as \"unavailable\" and is\n// never replaced by a number. Destination from the TELEGRAM_CHAT_ID env\n// variable of the n8n process; the bot token stays in n8n's credential store.\nconst record = $input.first().json || {};\n\nlet chatId = null;\ntry {\n  const raw = $env.TELEGRAM_CHAT_ID;\n  if (raw !== undefined && raw !== null && String(raw).trim() !== '') {\n    chatId = String(raw).trim();\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE): surfaced by the check below.\n}\nif (chatId === null) {\n  throw new Error('TELEGRAM_CHAT_ID is not configured on the n8n process (set it, and N8N_BLOCK_ENV_ACCESS_IN_NODE=false to allow $env)');\n}\n\n// The Telegram node sends with parse_mode HTML, so &, < and > in real lead\n// data (company names, reasons) must be escaped - Telegram would otherwise\n// reject the message. Escaping does not change what a human sees.\nconst esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nconst score = (typeof record.score === 'number' && Number.isFinite(record.score))\n  ? record.score\n  : 'unavailable';\n\nconst message = [\n  '\\u26A0\\uFE0F LEAD NEEDS MANUAL REVIEW',\n  '',\n  `Company: ${esc(record.company)}`,\n  `Lead ID: ${esc(record.leadId)}`,\n  `Score: ${esc(score)}`,\n  `Qualification: ${esc(record.qualification)}`,\n  `Source: ${esc(record.source)}`,\n  '',\n  `Reason: ${esc(record.reason)}.`,\n].join('\\n');\n\nreturn [{ json: { ...record, chatId, telegramMessage: message } }];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000018",
+      "name": "Build Manual Review Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.telegramMessage }}",
+        "replyMarkup": "none",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-lead-alerts",
+          "name": "Telegram Lead Alerts"
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000019",
+      "name": "Send Manual Review to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2160,
+        -320
+      ]
     }
   ],
   "connections": {
@@ -531,6 +613,11 @@
             "node": "Build Audit Event",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Build Qualified Notification",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -551,6 +638,33 @@
         [
           {
             "node": "Build Audit Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Review Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Qualified Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Qualified to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Review Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Manual Review to Telegram",
             "type": "main",
             "index": 0
           }

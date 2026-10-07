@@ -150,7 +150,7 @@ No schema changes. Reuse table `leads` and its existing indexes/constraint.
 
 ### Out of scope for Milestone 2
 
-AI, n8n, CRM, authentication, Docker, background workers, email, Telegram,
+AI, n8n, CRM, authentication, Docker, background workers, email,
 frontend, write/update/delete endpoints (`PATCH`, `DELETE`), bulk export.
 
 ## Milestone 3: AI Lead Scoring
@@ -234,7 +234,7 @@ rules. Minimum scenarios:
 
 ### Out of scope for Milestone 3
 
-n8n, CRM, authentication, Docker, background workers/queues, email, Telegram,
+n8n, CRM, authentication, Docker, background workers/queues, email,
 frontend, streaming, token/billing accounting, `PATCH`/`DELETE`, bulk export.
 
 ## Milestone 4: Offline Heuristic Scoring
@@ -303,7 +303,7 @@ signals (e.g. `"High-intent keywords (demo, pricing); corporate email domain"`).
 
 Configurable rule sets/weights, per-source tuning, ML models, prompt
 engineering, LLM fallback chains, n8n, CRM, auth, Docker, workers, email,
-Telegram, frontend, `PATCH`/`DELETE`, bulk export.
+frontend, `PATCH`/`DELETE`, bulk export.
 
 ## Milestone 5: Lead Status Workflow
 
@@ -372,7 +372,7 @@ pattern.
 
 Editing other lead fields (name/email/message), DELETE, transition-graph
 enforcement, bulk/batch updates, audit/history of status changes, n8n, CRM,
-auth, Docker, workers, email, Telegram, frontend.
+auth, Docker, workers, email, frontend.
 
 ## Milestone 6: Lead Export & Deletion
 
@@ -432,7 +432,7 @@ no schema changes, no configuration.
 
 JSON export, Excel formats, pagination/streaming for huge exports, bulk
 delete, soft delete/retention, auth on export/delete (still unauthenticated
-like every endpoint), n8n, CRM, Docker, workers, email, Telegram, frontend.
+like every endpoint), n8n, CRM, Docker, workers, email, frontend.
 
 ## Milestone 7: n8n Lead Intake Integration
 
@@ -507,7 +507,8 @@ never fabricated: a webhook `201` exists only because PostgreSQL stored the row.
 
 ### Out of scope for Milestone 7
 
-Notifications (email/Telegram/Slack), CRM handoff, enrichment, scheduled
+Notifications beyond the records themselves (email/Slack — Telegram was
+later added, narrowly, in Milestone 10), CRM handoff, enrichment, scheduled
 follow-ups, retries/queues, authentication, rate limiting, Docker, multi-workflow
 architecture, and any change to the FastAPI schema or endpoints.
 
@@ -562,7 +563,8 @@ Route on API Status ── 201 ──┬─► Respond Created            (Miles
 ```
 
 **Notification (as built in M8):** this environment has no
-email/Slack/Telegram/CRM, so each terminal node performs its action by
+email/Slack/CRM (Telegram delivery arrived later, in Milestone 10), so each
+terminal node performs its action by
 emitting one structured record (`action`, `leadId`, `company`, `source`,
 `score`, `qualification`, `priority`, `qualifiedThreshold`, plus `note` on
 manual review) **as its node output**, persisted in n8n's execution data —
@@ -595,8 +597,9 @@ plus a `summary` string and the unified audit event — see below.)*
 ### Out of scope for Milestone 8
 
 Delivering the routing records anywhere outside n8n's execution data
-(email/Telegram/Slack/CRM/webhook-out — none exists in this environment and
-none is faked), enrichment, scheduled follow-ups, retries/queues,
+(email/Slack/CRM/webhook-out — none exists in this environment and none is
+faked; Telegram was added later, in Milestone 10), enrichment, scheduled
+follow-ups, retries/queues,
 authentication, rate limiting, Docker, additional workflows, and **any change
 to FastAPI** (no contract gap was found: `score` is already `int | None` and
 the response already carries every field the routing needs).
@@ -632,7 +635,8 @@ Route on Qualification ──┬─ qualified     ─► Log Priority Route  ─
 - **Unified audit event** in `Build Audit Event`: `timestamp`
   (`$now.toISO()`), `executionId`, `executionMode`, plus the branch record
   unchanged — one structured event per executed lead, deliberately shaped to
-  feed a later email/Slack/Telegram/CRM/analytics consumer. No database
+  feed a later consumer (Milestone 10 attached Telegram, but to the branch
+  records; email/Slack/CRM/analytics remain future consumers). No database
   table, no FastAPI endpoint, no queue.
 - **Caller-response isolation, measured rather than assumed:** n8n 2.x
   `executionOrder: v1` orders sibling nodes by canvas position (top-most
@@ -642,9 +646,10 @@ Route on Qualification ──┬─ qualified     ─► Log Priority Route  ─
   `Respond Created` above the first operational node makes the caller get
   the genuine `201` first; the failure stays visible as a `status: error`
   execution. Connection lists remain byte-identical to Milestone 7.
-- Records are **workflow-native operational records, not external
-  notifications**: no email/Slack/Telegram/CRM integration exists in this
-  environment and none is faked or claimed.
+- Records are **workflow-native operational records**: Milestone 9 itself
+  delivered nothing — no email/Slack/CRM integration exists in this
+  environment and none is faked or claimed. (Milestone 10 below adds the
+  first real delivery: Telegram, for `qualified` and `manual_review` only.)
 
 ### Tests / validation (Milestone 9)
 
@@ -669,15 +674,90 @@ Route on Qualification ──┬─ qualified     ─► Log Priority Route  ─
 
 ### Out of scope for Milestone 9
 
-Any external delivery of the records (email/Slack/Telegram/CRM — none exists
-in this environment and none is faked or claimed), persisting audit events
+Any external delivery of the records (email/Slack/CRM — none exists in this
+environment and none is faked or claimed; Telegram delivery arrived in
+Milestone 10), persisting audit events
 (no table, no endpoint, no queue — the event lives in n8n's execution data
 on purpose), altering FastAPI (no contract gap: the webhook/lead contract
 already carries every field the records need), plus everything excluded in
 the preceding milestones.
 
+## Milestone 10: Telegram Lead Notifications
+
+The first real external business action of the workflow: the two
+qualification outcomes a human must act on — `qualified` and
+`manual_review` — are rendered from their existing operational records and
+delivered as Telegram messages to one configured chat. FastAPI keeps
+validation, persistence, duplicate detection **and scoring** (no backend
+change was needed); n8n keeps orchestration, qualification and now the
+notification. Full reference (policy, exact message samples, credential
+setup, measured ordering, fault evidence):
+[`docs/n8n-integration.md`](n8n-integration.md).
+
+### Design (four appended nodes; nothing existing touched)
+
+```
+Log Priority Route ─► Build Qualified Notification ─► Send Qualified to Telegram
+Log Manual Review  ─► Build Manual Review Notification ─► Send Manual Review to Telegram
+```
+
+- **Policy:** `qualified` → send; `manual_review` → send (a human must
+  review); `not_qualified` → no send; `409` / `422` / `502` → no send
+  (qualification, audit and notification never run).
+- **Messages are renderings, not records:** built only from real record
+  fields (`company`, `leadId`, `score`, `qualification`, `source`, plus
+  `reason` for manual review) — nothing fabricated. The structured record
+  stays authoritative: `score: null` remains `null` in the data while the
+  message shows `Score: unavailable`. The build node's output is the record
+  unchanged plus `chatId` and `telegramMessage`.
+- **Destination & credential:** one chat, `TELEGRAM_CHAT_ID` on the n8n
+  process (read via `$env`, explicit throw when missing or blocked); the bot
+  token exists only in n8n's encrypted credential store (`telegramApi`), and
+  the committed workflow carries only the non-secret `{id, name}` reference.
+  No recipient lookup, no user mapping, no multi-tenant/dynamic channels, no
+  other provider.
+- **Audit before notification:** both build nodes sit below
+  `Build Audit Event`, so n8n's v1 top-most-sibling-first ordering executes
+  the audit first — verified from persisted start timestamps, in the success
+  run *and* in the fault run.
+- **Caller isolation preserved:** the Telegram nodes carry no `onError`
+  override. A deliberately broken destination (invalid chat id, credential
+  untouched) left the caller's genuine `201` intact, failed the execution
+  with the Telegram error persisted (`Bad Request: chat not found`), and the
+  audit event had already run before the failed send — verified live, not
+  assumed from node placement.
+
+### Tests / validation (Milestone 10)
+
+1. Existing suites stay green (**83 tests**) — backend changes: **none**.
+2. Structural validation of the workflow JSON (**19 nodes** = 15 M9 nodes
+   byte-identical + 4 added; unique ids/names; every connection resolves; no
+   orphans; the 7 intended terminals; Telegram `typeVersion` `1.2` present in
+   the installed n8n sources; credential reference = `{id, name}` only;
+   `not_qualified` cannot reach any Telegram node; audit positioned above both
+   build nodes; hygiene regexes clean — no token, chat id, machine path, DSN
+   or SQL).
+3. **Live n8n execution, run personally** against n8n 2.41.7 — all seven
+   cases: qualified lead (real Telegram delivery observed, `message_id: 9`),
+   manual-review lead with `score: null` (real delivery observed,
+   `message_id: 8`, `Score: unavailable`, structured score still `null`),
+   not-qualified (0 Telegram node executions), duplicate → 409, validation →
+   422, FastAPI down → 502 (all three: no Telegram), and the controlled
+   Telegram fault (caller still `201`, execution `status=error` with the
+   Telegram error visible, audit persisted before the send). Scenario table:
+   [`docs/n8n-integration.md`](n8n-integration.md).
+
+### Out of scope for Milestone 10
+
+Any other channel or destination (email/Slack/CRM/webhook-out), recipient
+lookup / user mapping / multi-tenant or dynamic channel selection, retries,
+queues or a delivery pipeline for the send, delivery/read-receipt tracking
+beyond the Bot API response persisted in the execution data, notification
+rules or preferences, persisting audit events, altering FastAPI (no contract
+gap was found), plus everything excluded in the preceding milestones.
+
 ## Out of scope
 
-n8n beyond the single lead-intake workflow of Milestones 7–9, CRM,
+n8n beyond the single lead-intake workflow of Milestones 7–10, CRM,
 authentication, Docker, background workers, unrelated features.
 (AI is in scope via the Milestone 3 spec above.)

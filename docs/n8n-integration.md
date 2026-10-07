@@ -1,4 +1,4 @@
-# n8n ↔ FastAPI integration (Milestones 7–9)
+# n8n ↔ FastAPI integration (Milestones 7–10)
 
 This document describes the automation boundary between **n8n** and the
 FastAPI lead API: one importable workflow, `n8n/lead-intake.json`, that accepts
@@ -7,12 +7,17 @@ an external lead over a webhook, forwards it to `POST /leads`, returns the
 into a deterministic qualification decision with visibly divergent routing
 actions (Milestone 8), and — only for leads FastAPI actually created —
 records each decision as a structured operational event an operator can
-inspect in the execution data (Milestone 9).
+inspect in the execution data (Milestone 9). Milestone 10 then delivers the
+two records a human must act on — `qualified` and `manual_review` — as real
+Telegram messages to one configured chat, without touching the
+caller-response isolation Milestone 9 established.
 
 n8n orchestrates. FastAPI decides. Nothing about validation, persistence,
 duplicate detection or scoring is duplicated in n8n: the workflow *reads* the
 score FastAPI produced and labels it; it never computes, corrects or invents
-one.
+one. The Telegram message is a human-readable **rendering** of the operational
+record, never a substitute for it: the structured record stays authoritative
+in the execution data alongside the message.
 
 ## Flow
 
@@ -50,6 +55,15 @@ External lead source
         └─ other ──► Respond Upstream Error
         ▼
   caller receives an envelope that mirrors the API result
+
+  Telegram notification chains (Milestone 10) — appended to two branch
+  outputs only, positioned BELOW Build Audit Event on the canvas so the
+  audit event always executes first (top-most sibling runs first):
+
+    Log Priority Route ─► Build Qualified Notification ─► Send Qualified to Telegram
+    Log Manual Review  ─► Build Manual Review Notification ─► Send Manual Review to Telegram
+
+    not_qualified · 409 · 422 · 502  →  no Telegram node is reachable
 ```
 
 The 201 branch **fans out**: `Respond Created` answers the caller exactly as
@@ -72,7 +86,9 @@ continuing past a `respondToWebhook` node.
 | `Qualification` | **The one place the threshold rule is applied** (see Qualification rule). Labels the lead `qualified` / `not_qualified` / `manual_review` and attaches `priority` (`high` / `normal` / `null`). Reads the threshold from `Prepare Lead Payload` — it does not define or repeat it. |
 | `Route on Qualification` | Switch (string equality on `qualification`) with a defensive fallback output; the fallback — a state the decision node should never emit — is wired to `Log Manual Review`, so an unknown state goes to a human instead of being dropped. |
 | `Log Priority Route` / `Log Normal Route` / `Log Manual Review` | The three operational branches. Each emits its **operational record** (`event`, lead data, `reason`, threshold provenance) *plus a human-readable `summary`* as its node output, which n8n persists in the execution data (see Operational actions & audit event). |
-| `Build Audit Event` | Terminal merge of whichever branch ran: adds `timestamp` (n8n's `$now`), `executionId` and `executionMode` to the record, producing the **unified audit event** — the structured hand-off point a future channel (email, Slack, CRM, analytics) would consume. |
+| `Build Audit Event` | Terminal merge of whichever branch ran: adds `timestamp` (n8n's `$now`), `executionId` and `executionMode` to the record, producing the **unified audit event** — the structured hand-off point a consumer (email, Slack, CRM, analytics) would attach to. |
+| `Build Qualified Notification` / `Build Manual Review Notification` | Milestone 10. Code nodes appended to `Log Priority Route` / `Log Manual Review`: render the **existing branch record** into a plain-text Telegram message (real fields only — company, lead ID, score, qualification, source, plus `reason` for manual review) and resolve the destination chat from `$env.TELEGRAM_CHAT_ID` (explicit throw if it is missing or `$env` is blocked). Output = the record **unchanged** plus exactly two added keys: `chatId`, `telegramMessage`. |
+| `Send Qualified to Telegram` / `Send Manual Review to Telegram` | Milestone 10. `n8n-nodes-base.telegram` (`sendMessage`, typeVersion `1.2`), `chatId`/`text` as expressions off the build node's output, one `telegramApi` credential reference (id + name only — the token lives in n8n's credential store), **no `onError` override** so a delivery failure surfaces as a failed execution while the caller keeps its `201`. |
 
 ## Configuration
 
@@ -80,7 +96,8 @@ continuing past a `respondToWebhook` node.
 |---|---|---|---|
 | `LEAD_API_BASE_URL` | production | `http://localhost:8000` (constant at the top of the `Prepare Lead Payload` code node) | Base URL of the FastAPI service, **without** a trailing `/leads` |
 | `LEAD_QUALIFIED_THRESHOLD` | no | `70` (`DEFAULT_QUALIFIED_THRESHOLD`, same code node) | Score at which a lead is `qualified` (integer 0–100; out-of-range/invalid values are ignored and the default is used) |
-| `N8N_BLOCK_ENV_ACCESS_IN_NODE` | no | *(unset = blocked on n8n 2.x)* | Set to `false` to let the workflow read `LEAD_API_BASE_URL` / `LEAD_QUALIFIED_THRESHOLD` |
+| `TELEGRAM_CHAT_ID` | for notifications | — (no default: a destination must be configured) | Single destination chat for both Telegram sends; read via `$env` **inside the two build nodes**, which throw explicitly when it is unset or `$env` is blocked — a configuration error then shows up as a failed execution, never as a silent no-send and never as a caller error |
+| `N8N_BLOCK_ENV_ACCESS_IN_NODE` | no | *(unset = blocked on n8n 2.x)* | Set to `false` to let the workflow read `LEAD_API_BASE_URL` / `LEAD_QUALIFIED_THRESHOLD` **and** `TELEGRAM_CHAT_ID` |
 
 **One configuration source.** Both settings live in the configuration block at
 the top of the `Prepare Lead Payload` node, and both are resolved the same way
@@ -135,10 +152,16 @@ against the installed n8n **2.41.7**, not assumed:
 - To change a setting without touching the environment: edit the corresponding
   `DEFAULT_*` constant at the top of the `Prepare Lead Payload` node.
 
-No credentials are embedded in the JSON. The lead API is unauthenticated
-today (same as every other endpoint in this service), so the workflow needs no
-n8n credential either. When authentication is added later, attach it to the
-HTTP Request node through n8n credentials — not by editing this file.
+No secrets are embedded in the JSON. The lead API is unauthenticated today
+(same as every other endpoint in this service), so the HTTP Request node needs
+no n8n credential. The two Telegram nodes reference exactly one n8n
+credential — type `telegramApi`, `{"id": "telegram-lead-alerts", "name":
+"Telegram Lead Alerts"}` — which is the **non-secret reference n8n requires**;
+the bot token itself lives only in n8n's credential store (imported via
+`n8n import:credentials`, stored encrypted) and in a chmod-600 file outside
+this repository, never in a committed file. When API authentication is added
+later, attach it to the HTTP Request node through n8n credentials — not by
+editing this file.
 
 ## Integration contract (as implemented)
 
@@ -269,13 +292,14 @@ structured record as its node output**; the three records then merge into one
 unified audit event. Everything stays inside n8n's execution data — no
 database table, no FastAPI endpoint, no queue.
 
-> **These are workflow-native operational records, not external
-> notifications.** No email, chat message or webhook delivery happens: this
-> environment contains no email/Slack/Telegram/CRM integration and none was
-> invented. Nothing is "sent" anywhere — the records exist to be inspected in
-> the execution view (or n8n's database) and to define the payload a real
-> channel would consume later. They are therefore never described as emails,
-> alerts or "notifications delivered".
+> **Milestone 9 itself delivered nothing external — these were workflow-native
+> operational records, not notifications.** Milestone 10 (see *Telegram
+> notifications* below) adds the first real delivery: a Telegram message for
+> the `qualified` and `manual_review` branches only, rendered from the very
+> records described here. Email/Slack/CRM integrations still do not exist in
+> this environment and none is faked. The structured records remain the
+> authoritative artifact — a Telegram message is a human-readable rendering of
+> the same values, never a replacement for them.
 
 ### Record shape
 
@@ -348,10 +372,13 @@ context, producing **one unified downstream event per executed lead**:
 | … | the complete branch record above, unchanged |
 
 Structured rather than flattened into one string, it is the hand-off point a
-future consumer (email, Slack, Telegram, CRM, analytics) would attach to —
-after `Build Audit Event` for a single stream, or after a specific branch
-when a channel only wants one class of lead. Milestone 9 deliberately
-implements none of those channels and adds no storage for the event.
+consumer (email, Slack, CRM, analytics) would attach to — after
+`Build Audit Event` for a single stream, or after a specific branch when a
+channel only wants one class of lead. Milestone 9 implemented none of those
+channels and added no storage for the event; Milestone 10 attaches
+Telegram — but to the **branch records** of the two actionable outcomes,
+after the audit node has run, and the audit event itself stays storage-side
+in the execution data.
 
 ### Caller-response isolation
 
@@ -379,6 +406,133 @@ throwing `Extract Lead + Score` made the caller receive
 `500 {"message":"Error in workflow"}` although FastAPI had already stored the
 row; with the M9 position the same fault returns `201`, the execution is
 `status=error` with the injected message recorded, and the lead row exists.
+
+## Telegram notifications (Milestone 10)
+
+The first real external business action of this workflow: the two outcomes a
+human must act on — `qualified` and `manual_review` — render their existing
+operational record as a plain-text Telegram message and deliver it through
+n8n's Telegram node to one configured chat. Everything else stays silent.
+
+### Notification policy
+
+| Outcome | Telegram | Executed path |
+|---|---|---|
+| `qualified` | **send** | `Log Priority Route` → `Build Qualified Notification` → `Send Qualified to Telegram` |
+| `manual_review` | **send** — a human must review a lead the system could not score or decide | `Log Manual Review` → `Build Manual Review Notification` → `Send Manual Review to Telegram` |
+| `not_qualified` | **none** | `Log Normal Route` → `Build Audit Event` (terminal; no Telegram node reachable) |
+| `409` duplicate / `422` validation / `502` upstream | **none** — qualification, audit and notification nodes never run | `Respond Duplicate` / `Respond Validation Failed` / `Respond Upstream Error` |
+
+The two chains are **appended only** to `Log Priority Route` and
+`Log Manual Review`; no existing node, parameter, position or connection was
+modified (the artifact diff is purely additive, 0 deletions).
+
+### Message content
+
+Rendered **only** from the branch record's actual fields — `company`,
+`leadId`, `score`, `qualification`, `source` (plus `reason` for manual
+review). Nothing is fabricated or hardcoded. The build node's output is the
+record **unchanged** plus exactly two keys (`chatId`, `telegramMessage`), so
+the structured operational record stays authoritative and `score: null` stays
+`null` — the string `unavailable` appears only inside the rendered message.
+
+Qualified, exactly as delivered (Telegram API `ok: true`, `message_id: 9`,
+execution 10):
+
+```
+🔥 HIGH-PRIORITY LEAD
+
+Company: Harborline Systems
+Lead ID: 8
+Score: 95
+Qualification: qualified
+Source: website
+
+Action: Review and contact this lead.
+```
+
+Manual review, exactly as delivered (`ok: true`, `message_id: 8`, execution 9;
+the lead's structured `score` was `null`):
+
+```
+⚠️ LEAD NEEDS MANUAL REVIEW
+
+Company: Meadowline
+Lead ID: 7
+Score: unavailable
+Qualification: manual_review
+Source: referral
+
+Reason: scoring unavailable.
+```
+
+### Configuration & credentials
+
+- **Destination:** `TELEGRAM_CHAT_ID` on the n8n process, read by the build
+  nodes through `$env` (requires `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`).
+  Missing or blocked → the build node **throws** → failed execution
+  (visible), caller unaffected. Single destination by design: no recipient
+  lookup, no user mapping, no multi-tenant or dynamic channels.
+- **Bot token:** exists only in n8n's credential store — a `telegramApi`
+  credential (id `telegram-lead-alerts`) imported with
+  `n8n import:credentials` and stored **encrypted** (verified: the exported
+  `data` field is ciphertext, not plaintext). The committed workflow carries
+  only the non-secret `{id, name}` reference; no token, chat id or
+  credential data appears in any committed file.
+- **Telegram node settings** (source of truth: the `Telegram` node source in
+  the installed `n8n-nodes-base` 2.41.5 that ships with n8n 2.41.7 —
+  `version: [1, 1.1, 1.2]`): `typeVersion: 1.2`, `resource: message`,
+  `operation: sendMessage`, `chatId: "={{ $json.chatId }}"` (string
+  expression), `text: "={{ $json.telegramMessage }}"`,
+  `additionalFields: {appendAttribution: false, parse_mode: "HTML"}`. No
+  `onError` override: a failed send must surface as `status: error`.
+- Two settings were **measured, not guessed**, and both encode real n8n 2.x
+  behavior found by breaking the happy path first:
+  - `parse_mode: "HTML"` — n8n *forces* Markdown when `parse_mode` is unset
+    (`addAdditionalFields`), and Telegram then rejects the `_` in
+    `manual_review` with `can't parse entities` (observed live, execution 8).
+    HTML mode only treats `&<>` as special, so the build nodes HTML-escape
+    interpolated values — a no-op for normal data (the delivered messages
+    above are byte-identical to the policy examples).
+  - `resource`/`operation`/`replyMarkup` are stored **explicitly** even
+    though they have defaults: n8n's load-time parameter normalization drops
+    collection keys whose `displayOptions` (`/operation: ['sendMessage']`)
+    cannot resolve against a parameter set that has no `operation` — without
+    them `appendAttribution: false` was silently reset to `{}` and n8n's
+    "sent automatically with n8n" footer appeared (observed live,
+    executions 1–2).
+
+### Audit before notification
+
+Both build nodes sit **below** `Build Audit Event` on the canvas
+(`y = -400`/`-320` vs `-480`), and n8n 2.x `executionOrder: v1` runs the
+top-most sibling first — so for either branch the order is
+`Build Audit Event` → build notification → Telegram send. Verified from the
+**persisted start timestamps**, not canvas position alone:
+
+- execution 10 (qualified): audit `…168349 ms` → build `…168362` → send `…168374`
+- execution 16 (fault run): audit `…369834` → build `…369846` → send `…369857` — the
+  audit event is fully persisted **even though the send then failed**
+
+### Caller isolation with Telegram in the chain
+
+The M9 guarantee extends unchanged: `Respond Created` still executes before
+qualification, audit and notification, and no notification node sets
+`onError: continue*`. Deliberately verified by breaking Telegram (fault run,
+execution 16): the `chatId` expression was replaced with an invalid literal
+destination (no credential touched), then a qualified lead was sent —
+the caller received a **genuine `201`** with the row stored, the execution
+failed with `status: error` and `NodeApiError: Bad request … Bad Request:
+chat not found` persisted, and the audit event ran before the failed send.
+A Telegram failure can therefore never turn an accepted intake into a fake
+`500`, and it is never swallowed.
+
+Operational caveat found during that test: right after an import+publish+
+restart, the webhook can briefly serve the **previously published** version
+(execution 15 ran ~18 s after the reload on the old version and delivered a
+real message); the faulted version was in effect 139 s later (execution 16).
+Wait for the new publication to settle (or verify the active version) before
+testing a freshly reloaded workflow.
 
 ## Importing and activating
 
@@ -409,8 +563,10 @@ it the CLI fails with `NOT NULL constraint failed: workflow_entity.id`.)
 
 Local development assumptions: FastAPI on `localhost:8000`
 (`.venv/bin/uvicorn app.main:app`), n8n on `localhost:5678`, both on the same
-machine, PostgreSQL reachable by FastAPI. Nothing else is required — no queue,
-no Redis, no credentials.
+machine, PostgreSQL reachable by FastAPI. Nothing else is required — no queue
+and no Redis. The one credential the workflow uses (Telegram bot token) is
+created once in n8n's credential store, not in this repository (see
+Configuration).
 
 Two n8n 2.x port facts worth knowing (both hit while testing this workflow):
 
@@ -423,16 +579,61 @@ Two n8n 2.x port facts worth knowing (both hit while testing this workflow):
 ## Scope
 
 In scope: this single intake workflow (intake + qualification routing +
-operational/audit records) and the boundary it defines.
+operational/audit records + Telegram delivery of the two actionable records)
+and the boundary it defines.
 
-Out of scope for these milestones (later work): delivering the operational
-records anywhere outside n8n's own execution data (email/Telegram/Slack/CRM —
-the records are the payload such a channel would consume), persisting the
-audit event (no table, no endpoint — that is deliberate for Milestone 9),
-enrichment, scheduled follow-ups, retries and queues, authentication, rate
-limiting, Docker, additional workflows.
+Out of scope for these milestones (later work): any delivery channel besides
+the single-destination Telegram send of Milestone 10 (email/Slack/CRM/
+webhook-out — Telegram was deliberately the first and only channel),
+recipient lookup or multi-tenant/multi-channel notifications, persisting the
+audit event (no table, no endpoint — that is deliberate), enrichment,
+scheduled follow-ups, retries and queues, authentication, rate limiting,
+Docker, additional workflows.
 
 ## Verification
+
+### Milestone 10 — run personally against a live n8n instance
+
+Environment: n8n `2.41.7` (nodes-base `2.41.5`) with the workflow imported
+via `n8n import:workflow` + `n8n publish:workflow --id=lead-intake`, the
+Telegram credential imported via `n8n import:credentials`, the n8n process
+started with `TELEGRAM_CHAT_ID` set and
+`N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, FastAPI (uvicorn, PostgreSQL test
+database) run in heuristic scoring mode — or, for case 2, with a bogus
+`OPENAI_API_KEY` and a dead `OPENAI_BASE_URL`. Node order, records, errors
+and the Telegram API responses were read from n8n's persisted execution data
+(`execution_data`), i.e. the same artifact an operator inspects. Every
+"delivered" claim below is an actual Telegram API `ok: true` response with a
+`message_id` observed in the `Send … to Telegram` node output — and the
+messages were visible in the destination chat.
+
+| # | Scenario | Expected | Observed |
+|---|---|---|---|
+| 1 | qualified lead (intent keywords + corporate domain → score 95), threshold 70 | `201`, `qualified`/`high`, audit event, Telegram delivered with the real lead fields | exec 10: `201`, order `… Respond Created (…217) → … Log Priority Route (…334) → Build Audit Event (…349) → Build Qualified Notification (…362) → Send Qualified to Telegram (…374)`; Telegram `ok:true`, `message_id: 9`, text = `🔥 HIGH-PRIORITY LEAD … Company: Harborline Systems / Lead ID: 8 / Score: 95 / Qualification: qualified / Source: website … Action: Review and contact this lead.` |
+| 2 | unscored lead (bogus `OPENAI_API_KEY` + dead `OPENAI_BASE_URL` → `score: null`) | `201`, `manual_review`, structured `score` stays `null`, Telegram delivered showing `Score: unavailable` | exec 9: `201`, `score: null`, record `event:"lead_manual_review"`, `reason:"scoring unavailable"`, audit (…212) → build (…225) → send (…240); Telegram `ok:true`, `message_id: 8`, text = `⚠️ LEAD NEEDS MANUAL REVIEW … Score: unavailable … Reason: scoring unavailable.` — structured `score` still `null` in every record |
+| 3 | not-qualified lead (free-mail + newsletter + one-word message → score 12) | `201`, `not_qualified`, **no** Telegram node executes | exec 13: `201`, `qualification:"not_qualified"`, path ends `Log Normal Route → Build Audit Event`, **0 Telegram nodes executed** |
+| 4 | duplicate `(source, external_id)` (case-1 payload re-sent) | `409`, no qualification/audit/notification | exec 11 (+17 re-run): `409`, nodes = `…→ Respond Duplicate` only (5 nodes) |
+| 5 | payload missing `email` | `422`, no qualification/audit/notification | exec 12: `422` with FastAPI field errors passed through, `Respond Validation Failed` only |
+| 6 | FastAPI process stopped | `502` (`apiStatus: null`), no qualification/audit/notification | exec 14: `502`, `Respond Upstream Error` only, **0 Telegram nodes** |
+| 7 | **Telegram fault**: `Send Qualified to Telegram`'s `chatId` replaced with an invalid literal destination (credential untouched), then a qualified lead | genuine `201` **and** a visible execution failure | exec 16: caller `201` with `lead_id: 12` stored; execution `status=error`; `NodeApiError: Bad request … Bad Request: chat not found` on `Send Qualified to Telegram` with `chatId: 'INVALID_FAULT_DESTINATION_7'` persisted; `Build Audit Event` had already run (…834 → build …846 → send …857); no `onError` on the node, failure not swallowed. (Execution 15, 18 s after the reload, ran the previous published version — see the operational caveat in the M10 section.) |
+
+Also personally verified for this milestone: **audit-before-notification**
+from persisted start timestamps in both the success (exec 10) and the fault
+(exec 16) runs; actual Telegram deliveries for both message types (`message_id`
+8 = manual review, 9 = qualified — plus earlier debugging deliveries 5, 6, 7
+from pre-final iterations and 10 from the execution-15 race); the structural
+validator over the JSON (**19 nodes**, unique ids/names, all connections
+resolve, no orphans, exactly the 7 intended terminals, every M7–M9 node
+byte-identical to `HEAD` except the two appended connection arrays, Telegram
+`typeVersion` `1.2 ∈ [1, 1.1, 1.2]` as declared in the installed sources,
+credential reference = `{id, name}` only, notification policy wiring —
+`not_qualified` cannot reach any Telegram node, `audit y < build y` for both
+chains — and hygiene regexes clean: no token pattern, no chat id, no
+machine paths, no DSNs, no SQL); message-format unit tests of the build-node
+code (11/11: exact qualified/manual formats, `score` stays `null`, numeric
+score rendered when present, HTML-escaping of `&<>`, loud failure on
+missing/blocked `TELEGRAM_CHAT_ID`); `pytest -q` → **83 passed** (backend
+untouched).
 
 ### Milestone 9 — run personally against a live n8n instance
 
@@ -542,17 +743,23 @@ as a regression check here (scenarios 1, 4, 5, 6 above reproduce its codes):
 **Not tested (any milestone):** running n8n in queue/multi-main mode,
 Dockerised n8n, `webhook-test` (editor) URLs, manual "test" executions
 (so every observed audit event carries `executionMode: "production"`),
-credential/auth flows (none is used), concurrent submissions to the same
-`(source, external_id)`, and any real notification channel (none exists
-here — records stay in execution data). The backend contract itself is
-covered by the 83 pytest tests.
+authentication on the lead API (none exists — the only credential in play is
+n8n's stored Telegram token), concurrent submissions to the same
+`(source, external_id)`, delivery to any channel other than the
+single-destination Telegram send of Milestone 10 (no email/Slack/CRM
+integration exists here and none is faked), and anything beyond the Bot API
+responses persisted in the execution data (no Telegram delivery/read receipts
+are tracked). The backend contract itself is covered by the 83 pytest tests.
 
 **Known limitations:** the threshold is an unvalidated business default
-(above); execution-data records are only visible to someone with access to
-the n8n instance (UI or database) — nothing pushes them to a human, and
-there is no delivery, retry or acknowledgement of any kind; `timestamp` is
-n8n's wall clock at audit-node execution, not FastAPI's `created_at`
-(FastAPI's value stays on the lead row itself); a *failed* operational node
-surfaces as a failed execution (`status: error`) while the caller keeps its
-`201` — verified in cases 11–12 — which means operational failures are
-noticed only by monitoring of n8n, never by the caller.
+(above); the `not_qualified` record still exists only in n8n's execution
+data — only `qualified` and `manual_review` are pushed to a human, and that
+Telegram send is a single attempt with no retry, no queue and no
+delivery/read-receipt tracking beyond the Bot API response persisted in the
+execution data; exactly one configured destination, no recipient rules;
+`timestamp` is n8n's wall clock at audit-node execution, not FastAPI's
+`created_at` (FastAPI's value stays on the lead row itself); a *failed*
+operational or notification node surfaces as a failed execution
+(`status: error`) while the caller keeps its `201` — verified in cases 11–12
+(M9) and case 16 (M10) — so such failures are noticed only by monitoring of
+n8n, never by the caller.
