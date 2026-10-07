@@ -1,0 +1,40 @@
+# =====================================================================
+# Caddy — public entry point for the lead stack (one domain).
+#
+#   https://<domain>/            -> rendered lead form (var/www)
+#   https://<domain>/webhook/*   -> n8n on 127.0.0.1 (path preserved)
+#
+# Everything else (n8n editor, n8n REST API, FastAPI) stays loopback-only.
+# Automatic HTTPS (Let's Encrypt) requires DNS for LEAD_DOMAIN pointing at
+# this host and ports 80/443 reachable. Cert renewal is handled by Caddy.
+#
+# Required environment (defaults below are placeholders — export the real
+# values before serving; `caddy validate` works either way):
+#   LEAD_DOMAIN    e.g. lead.example.com
+#   LEAD_WWW_ROOT  absolute path to the rendered form root (render-form.sh)
+# Optional environment:
+#   N8N_PROXY_PORT reverse-proxy target port (default 5678)
+# =====================================================================
+
+{$LEAD_DOMAIN:CHANGE_ME.example} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+
+	# n8n production webhook — path preserved (n8n itself routes /webhook/*).
+	# No Access-Control-* headers are added here: CORS lives in n8n, and in
+	# this same-origin topology browsers never exercise it.
+	handle /webhook/* {
+		reverse_proxy 127.0.0.1:{$N8N_PROXY_PORT:5678}
+	}
+
+	# Rendered lead form (deploy/bin/render-form.sh -> var/www).
+	handle {
+		root * {$LEAD_WWW_ROOT:/opt/lead-intake/var/www}
+		file_server
+	}
+}

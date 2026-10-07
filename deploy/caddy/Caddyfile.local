@@ -1,0 +1,28 @@
+# =====================================================================
+# Local rehearsal of the production topology (plain HTTP on :8080).
+#
+#   http://localhost:8080/            -> rendered lead form (var/www)
+#   http://localhost:8080/webhook/*   -> local n8n
+#
+# This is the SAME routing shape as the production Caddyfile, without
+# TLS/domain — used to validate same-origin form submission end-to-end.
+#
+#   LEAD_WWW_ROOT=$PWD/var/www \
+#     caddy run --config deploy/caddy/Caddyfile.local
+# =====================================================================
+{
+	auto_https off
+}
+
+:8080 {
+	encode gzip
+
+	handle /webhook/* {
+		reverse_proxy 127.0.0.1:5678
+	}
+
+	handle {
+		root * {$LEAD_WWW_ROOT}
+		file_server
+	}
+}

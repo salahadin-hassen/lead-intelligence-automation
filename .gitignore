@@ -6,9 +6,14 @@ __pycache__/
 # Environment / secrets
 .env
 .env.*
+*.env
 
 # Testing
 .pytest_cache/
+
+# Deployment runtime artifacts (rendered form, pid files, logs, throwaway
+# validation data — never commit)
+var/
 
 # IDE
 .vscode/

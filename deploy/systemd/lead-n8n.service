@@ -1,0 +1,33 @@
+[Unit]
+Description=Lead Intelligence Automation - n8n workflow engine
+Documentation=file:/opt/lead-intake/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Provision: sudo useradd --system --home-dir /var/lib/lead-intake \
+#   --create-home --shell /usr/sbin/nologin leadintake
+User=leadintake
+Group=leadintake
+WorkingDirectory=/opt/lead-intake
+Environment=PYTHONUNBUFFERED=1
+# Fails fast (by design) if the operator has not created the real env file.
+# Holds: N8N_USER_FOLDER (persistent data), N8N_ENCRYPTION_KEY, public URLs,
+# LEAD_API_BASE_URL, TELEGRAM_CHAT_ID. The bot token is NOT here — it lives
+# in n8n's encrypted credential store under $N8N_USER_FOLDER/.n8n.
+EnvironmentFile=/opt/lead-intake/deploy/env/n8n.env
+ExecStart=/opt/lead-intake/deploy/bin/run-n8n.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Hardening: only the reverse proxy (loopback) and outbound HTTPS are needed.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/lead-intake
+
+[Install]
+WantedBy=multi-user.target

@@ -186,6 +186,8 @@
 </head>
 <body>
 <main class="card">
+  <div id="config-banner" class="banner error" role="alert" hidden></div>
+
   <header>
     <h1>Talk to our team</h1>
     <p class="subtitle">Tell us what you&rsquo;re working on and we&rsquo;ll get back to you within one business day.</p>
@@ -248,27 +250,32 @@
   </div>
 </main>
 
+<script src="config.js"></script>
 <script>
 /* =====================================================================
  * Demo lead form — configuration
  * =====================================================================
  * The n8n production webhook URL is configured in exactly ONE place:
- * CONFIG.webhookUrl below. Nothing else in this file hardcodes it.
+ * config.js (window.LEAD_FORM_CONFIG.webhookUrl), loaded just above this
+ * block. This script only reads it; nothing here hardcodes a URL. The
+ * committed config.js holds the local development default — deployments
+ * replace that file (deploy/bin/render-form.sh / DEMO_N8N_WEBHOOK_URL).
  *
  * Flow:  Browser -> n8n webhook (POST /webhook/lead-intake)
  *             -> FastAPI /leads -> PostgreSQL + scoring
  *             -> qualification -> audit -> Telegram
  * The form never calls FastAPI directly.
  *
- * Developer/duplicate testing: open the page with ?ext=<id> to pin the
- * client-generated external_id, e.g. ?ext=demo-dup-1. Submitting twice
- * with the same content then demonstrates the duplicate (409) response.
- * The external_id is otherwise generated per message in the browser with
- * crypto.randomUUID() so an accidental retry of the same message does not
- * create a second row; it is NOT a claim of global uniqueness.
+ * Developer/duplicate testing: open the page with ?external_id=<id> to
+ * pin the client-generated external_id, e.g. ?external_id=demo-dup-1.
+ * Submitting twice with the same content then demonstrates the duplicate
+ * (409) response. The external_id is otherwise generated per message in
+ * the browser with crypto.randomUUID() so an accidental retry of the same
+ * message does not create a second row; it is NOT a claim of global
+ * uniqueness.
  * ===================================================================== */
 const CONFIG = {
-  webhookUrl: "http://localhost:5679/webhook/lead-intake",
+  webhookUrl: (window.LEAD_FORM_CONFIG || {}).webhookUrl || "",
   source: "website-contact-form",
 };
 
@@ -279,6 +286,18 @@ const form = document.getElementById("lead-form");
 const banner = document.getElementById("banner");
 const submitBtn = document.getElementById("submit-btn");
 const submitLabel = document.getElementById("submit-label");
+
+/* Loud, visible misconfiguration state: no webhook URL means the page
+ * was served without its config.js (or an empty one) — never fail
+ * silently into a generic network error. */
+if (!CONFIG.webhookUrl) {
+  const configBanner = document.getElementById("config-banner");
+  configBanner.textContent =
+    "This form is not set up correctly (config.js is missing its webhook URL). " +
+    "Please contact the site operator.";
+  configBanner.hidden = false;
+  console.error("[lead-form] LEAD_FORM_CONFIG.webhookUrl is missing — check config.js");
+}
 
 const FIELDS = ["name", "email", "company", "message"];
 
@@ -382,6 +401,7 @@ function setSubmitting(isSubmitting) {
 async function handleSubmit(event) {
   event.preventDefault();
   clearAllErrors();
+  if (!CONFIG.webhookUrl) return; /* config banner already visible */
   if (!validateForm()) return;
 
   const payload = {

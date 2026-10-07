@@ -1,0 +1,28 @@
+[Unit]
+Description=Lead Intelligence Automation - FastAPI lead API
+Documentation=file:/opt/lead-intake/docs/deployment.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Provision: sudo useradd --system --home-dir /var/lib/lead-intake \
+#   --create-home --shell /usr/sbin/nologin leadintake
+User=leadintake
+Group=leadintake
+WorkingDirectory=/opt/lead-intake
+Environment=PYTHONUNBUFFERED=1
+# Fails fast (by design) if the operator has not created the real env file:
+EnvironmentFile=/opt/lead-intake/deploy/env/api.env
+ExecStart=/opt/lead-intake/deploy/bin/run-api.sh
+Restart=on-failure
+RestartSec=3
+
+# Hardening: the API needs loopback + database only.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

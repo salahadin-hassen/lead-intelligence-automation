@@ -34,6 +34,12 @@ missing.
   (`demo/lead-form.html`) acting as a real lead source: it submits through
   the n8n webhook like any other caller and maps the workflow's actual
   response envelope to success / validation / duplicate / upstream states.
+- **Deployable as a single-client instance** — systemd units, a Caddy
+  reverse proxy (public HTTPS → same-origin form + `/webhook/*`), externalized
+  env files with placeholder-only templates, and reproducible
+  start/stop/logs/migrations/healthcheck/smoke commands. Validated on a
+  production-shaped local stack including failure drills; **deployment-ready,
+  not publicly deployed** (see [`docs/deployment.md`](docs/deployment.md)).
 
 ## Architecture
 
@@ -268,6 +274,9 @@ Webhook (POST /webhook/lead-intake)
   the JSON — the API is unauthenticated today.
 
 ```bash
+# simplest: the shipped script does both steps offline (n8n stopped)
+deploy/bin/import-workflow.sh && deploy/bin/stack.sh restart
+# equivalent by hand:
 n8n import:workflow --input=n8n/lead-intake.json   # upserts by the shipped id
 n8n publish:workflow --id=lead-intake              # activate (n8n 2.x)
 # restart n8n if it was already running, then:
@@ -276,6 +285,12 @@ curl -X POST localhost:5678/webhook/lead-intake -H 'Content-Type: application/js
        "message":"Please send pricing for the enterprise plan.",
        "source":"partner-referral","external_id":"ext-9001"}'
 ```
+
+Note for operators: n8n applies publications asynchronously — after an
+import+publish the *running* instance can briefly serve the previous
+version. Restarting after the import (as the script tells you to) and
+waiting for convergence is mandatory; `stack.sh start` does that wait
+automatically (see [`docs/deployment.md`](docs/deployment.md)).
 
 **Validated against a live n8n 2.41.7 instance** — intake codes
 (created/duplicate/invalid/unreachable/upstream-500), all three
@@ -304,21 +319,28 @@ python3 -m http.server 8001 --directory demo
 # open http://localhost:8001/lead-form.html
 ```
 
-- **One configuration point:** `CONFIG` at the top of the `<script>` block in
-  `demo/lead-form.html` — `webhookUrl` (default
-  `http://localhost:5679/webhook/lead-intake`, this machine's n8n; change it
-  there if n8n lives elsewhere) and `source`
-  (`website-contact-form`, the vocabulary the API tests already use). The URL
-  appears nowhere else in the file.
+- **One configuration point:** `demo/config.js` (`window.LEAD_FORM_CONFIG`)
+  — `webhookUrl`, default `http://localhost:5679/webhook/lead-intake` (this
+  machine's n8n; change it there if n8n lives elsewhere). A deployment never
+  edits files by hand: `deploy/bin/render-form.sh` regenerates the served
+  `config.js` from `form.env`'s `DEMO_N8N_WEBHOOK_URL`. If the file or URL is
+  missing, the form shows a visible setup error and refuses to submit. The
+  `source` label (`website-contact-form`, the vocabulary the API tests use)
+  is a constant next to the form logic.
 - **Request path:** browser → n8n `POST /webhook/lead-intake` → FastAPI
   `POST /leads` → PostgreSQL + scoring → qualification → audit → Telegram.
   The form never calls FastAPI directly, contains no scoring or qualification
   logic, and exposes no scores or internals to the person filling it in.
-- **CORS: direct browser → n8n, no proxy.** n8n 2.41.7 answers the form's
-  preflight (`OPTIONS` → `204` with reflected `Access-Control-Allow-*` headers)
-  and returns `Access-Control-Allow-Origin` on the webhook response, so a
-  plain cross-origin `fetch()` works as-is; no proxy or backend change was
-  needed.
+- **CORS: only the local cross-origin case needs it.** In local development
+  the form (`localhost:8001`) posts cross-origin to n8n (`localhost:5679`):
+  n8n 2.41.7 answers the preflight (`OPTIONS` → `204`) and the workflow's
+  webhook option allowlists exactly that origin
+  (`allowedOrigins: http://localhost:8001` — the only workflow change in the
+  deployment milestone; other origins get a mismatched
+  `Access-Control-Allow-Origin` and are blocked by the browser). In
+  production the form is served from the same domain as `/webhook/*`
+  (Caddy), so requests are same-origin: no preflight, no CORS dependence —
+  verified in the browser (zero `OPTIONS` requests observed).
 - **States come from the workflow's real envelope:** `201 created` → success
   panel ("Thanks. Your message has been received."), `409 duplicate` → "we
   already have this message", `422 validation_failed` → friendly per-field
@@ -333,9 +355,12 @@ python3 -m http.server 8001 --directory demo
   demos open `lead-form.html?external_id=<fixed-id>` and submit twice: the
   second attempt renders the duplicate state, while the server keeps owning
   the `(source, external_id)` rule.
-- **Not deployed anywhere.** It is a local page from a throwaway
-  `python3 -m http.server` — no build step, no dependencies, no credentials,
-  no auth; suited to demos on this machine only.
+- **Local demo by default, rendered for deployment.** Development serves it
+  from a throwaway `python3 -m http.server`; a deployment serves the rendered
+  copy under `var/www` through Caddy (same origin as the webhook). No build
+  step, no dependencies, no credentials, no auth either way — it is a lead
+  source for this pipeline, not a product frontend, and it is **not publicly
+  deployed today**.
 
 Personally verified end to end from a real browser (headless Chrome driving
 the actual form): qualified → Telegram `message_id: 11`, not-qualified → no
@@ -343,10 +368,42 @@ send, unscored → manual-review `message_id: 12`, duplicate → 409, invalid �
 client-side block plus an authoritative 422, FastAPI stopped → 502 with no
 row and no notification.
 
+## Deployment
+
+Deployment configuration lives under `deploy/` and is documented in full in
+[`docs/deployment.md`](docs/deployment.md) (architecture, provisioning
+sequence, env files, health semantics, CORS model, failure drills, backup,
+and an explicit verified/unverified ledger).
+
+```bash
+cp deploy/env/api.env.example  deploy/env/api.env    # DATABASE_URL, …
+cp deploy/env/n8n.env.example  deploy/env/n8n.env    # public URLs, key, chat id
+cp deploy/env/form.env.example deploy/env/form.env   # webhook URL for the form
+deploy/bin/import-workflow.sh  # offline, before the first start
+deploy/bin/stack.sh start      # or the systemd units in deploy/systemd/
+deploy/bin/healthcheck.sh      # exit 0 = everything usable, not just running
+deploy/bin/smoke.sh            # end-to-end through the real webhook (1 real Telegram)
+```
+
+Shape: **public HTTPS (Caddy) → same-origin form + `/webhook/*` → n8n
+(loopback) → FastAPI (loopback) → PostgreSQL → Telegram**. Two supervised
+processes, one proxy, one database — no containers, queue or microservices.
+Secrets are env-file/credential-store only (`deploy/env/*.env` and `var/`
+are gitignored; only `CHANGE_ME` templates are tracked).
+
+**Status: deployment-ready — yes; public deployment personally verified —
+no.** Everything was validated on a production-shaped local stack (fresh
+database, fresh n8n folder, reverse proxy, failure drills, browser runs,
+`pytest` 83 passed); no domain, TLS issuance or remote host was involved.
+
 ## Configuration
 
 Read from the environment or `.env` (`.env` is gitignored; `.env.example` is
 the committed template). Secrets are never printed, logged or returned.
+Deployment splits the same variables into three gitignored env files with
+committed `CHANGE_ME` templates — `deploy/env/api.env` (this table),
+`deploy/env/n8n.env` and `deploy/env/form.env` (table below and
+[`docs/deployment.md`](docs/deployment.md)).
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
@@ -398,10 +455,14 @@ app/
   errors.py          application-level exceptions
 sql/                 001–004 idempotent migrations
 n8n/lead-intake.json importable webhook → POST /leads → routing + audit records
-demo/lead-form.html  single-file demo contact form → n8n webhook (local only)
+demo/lead-form.html  single-file demo contact form → n8n webhook (config.js points it)
+demo/config.js       THE single place the form's webhook URL lives (local default)
+deploy/              env templates (.example), run/stack/import/render/
+                     healthcheck/smoke/migrate scripts, systemd units, Caddyfiles
 tests/               83 integration + unit tests
 docs/requirements.md source of truth for project scope
 docs/n8n-integration.md  the n8n contract and operating guide
+docs/deployment.md   deployment guide, failure drills, verified/unverified ledger
 ```
 
 ## Design principles
@@ -422,15 +483,21 @@ deletion, health — as specified in [`docs/requirements.md`](docs/requirements.
 (Milestones 1–6), plus a hardening pass (indexes, health probe, docs), the
 n8n intake workflow (Milestone 7), its qualification routing (Milestone 8),
 the operational/audit layer (Milestone 9), Telegram notifications for the
-two actionable outcomes (Milestone 10) and a local demo lead form that feeds
-the same webhook (Milestone 11).
+two actionable outcomes (Milestone 10), a local demo lead form that feeds
+the same webhook (Milestone 11) and a reproducible single-client deployment
+(Milestone 12: systemd units, Caddy reverse proxy, externalized env files,
+healthcheck/smoke commands and verified failure semantics — see
+[`docs/deployment.md`](docs/deployment.md)).
 
 **Deliberately out of scope:** authentication, rate limiting, Docker, CRM,
-background workers, a production frontend (the `demo/` form is local-only),
+background workers, an independently designed production frontend (the
+`demo/` form is the lead source and is rendered by the deployment),
 email/Slack and any notification channel or
 destination beyond the single configured Telegram chat, status
-transition-graph enforcement, retries/queues, multi-workflow automation. The
-service is not exposed publicly in its current form.
+transition-graph enforcement, retries/queues, multi-workflow automation.
+Deployment status is stated honestly in
+[`docs/deployment.md`](docs/deployment.md): **deployment-ready, not publicly
+deployed** — no domain, TLS issuance or remote host was involved.
 
 **Next:** more n8n workflows on top of this boundary — additional
 notification channels/rules, lead routing and CRM handoff.

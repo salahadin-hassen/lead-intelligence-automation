@@ -7,7 +7,9 @@
         "httpMethod": "POST",
         "path": "lead-intake",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {
+          "allowedOrigins": "http://localhost:8001"
+        }
       },
       "id": "5f1d2a10-0000-4000-8000-000000000001",
       "name": "Lead Webhook",

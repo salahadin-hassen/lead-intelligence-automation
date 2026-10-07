@@ -1,4 +1,4 @@
-# n8n ↔ FastAPI integration (Milestones 7–11)
+# n8n ↔ FastAPI integration (Milestones 7–12)
 
 This document describes the automation boundary between **n8n** and the
 FastAPI lead API: one importable workflow, `n8n/lead-intake.json`, that accepts
@@ -13,7 +13,9 @@ Telegram messages to one configured chat, without touching the
 caller-response isolation Milestone 9 established. Milestone 11 adds a local
 single-file contact form (`demo/lead-form.html`) that feeds this exact
 webhook as a real lead source — browser → n8n → FastAPI — changing no
-backend contract.
+backend contract. Milestone 12 wraps the same boundary in a reproducible
+deployment (systemd + Caddy + env files) without changing the contract;
+the deployment guide is [`docs/deployment.md`](deployment.md).
 
 n8n orchestrates. FastAPI decides. Nothing about validation, persistence,
 duplicate detection or scoring is duplicated in n8n: the workflow *reads* the
@@ -101,6 +103,12 @@ continuing past a `respondToWebhook` node.
 | `LEAD_QUALIFIED_THRESHOLD` | no | `70` (`DEFAULT_QUALIFIED_THRESHOLD`, same code node) | Score at which a lead is `qualified` (integer 0–100; out-of-range/invalid values are ignored and the default is used) |
 | `TELEGRAM_CHAT_ID` | for notifications | — (no default: a destination must be configured) | Single destination chat for both Telegram sends; read via `$env` **inside the two build nodes**, which throw explicitly when it is unset or `$env` is blocked — a configuration error then shows up as a failed execution, never as a silent no-send and never as a caller error |
 | `N8N_BLOCK_ENV_ACCESS_IN_NODE` | no | *(unset = blocked on n8n 2.x)* | Set to `false` to let the workflow read `LEAD_API_BASE_URL` / `LEAD_QUALIFIED_THRESHOLD` **and** `TELEGRAM_CHAT_ID` |
+
+**Deployment:** none of this is exported by hand — a deployment keeps these
+values in the gitignored `deploy/env/n8n.env` (template:
+`deploy/env/n8n.env.example`), loaded by the systemd unit or
+`deploy/bin/stack.sh`; the form's webhook URL is configured once in
+`deploy/env/form.env`. See [`docs/deployment.md`](deployment.md).
 
 **One configuration source.** Both settings live in the configuration block at
 the top of the `Prepare Lead Payload` node, and both are resolved the same way
@@ -608,10 +616,29 @@ written, not guessed:
 | `POST` with `Origin` | response carries `Access-Control-Allow-Origin: <origin>` |
 
 The webhook answers cross-origin requests out of the box, so the form uses a
-plain `fetch()` **directly against n8n**. No proxy exists anywhere in this
-milestone: no `demo/` server beyond a static file server, no second backend,
-no FastAPI exposure, no n8n CORS settings changed. (Had a proxy been needed,
-it would have been documented here as a local-only transport adapter.)
+plain `fetch()` **directly against n8n**. In M11 no proxy existed anywhere:
+no `demo/` server beyond a static file server, no second backend, no
+FastAPI exposure, no n8n CORS settings changed.
+
+**Milestone 12 added the deployment topology and made the CORS policy
+explicit instead of implicit:**
+
+- The workflow's Lead Webhook now carries
+  `parameters.options.allowedOrigins = "http://localhost:8001"` — the local
+  dev origin is **allowlisted** (this is the only change to
+  `n8n/lead-intake.json` in M12). Probes against n8n 2.41.7: an allowed
+  origin gets `204` + `Access-Control-Allow-Origin: http://localhost:8001`;
+  a different origin (e.g. `http://evil.example`) still receives a
+  *mismatched* ACAO (the option allowlists, it does not reflect), so the
+  browser blocks the read; requests without an `Origin` header (curl,
+  server-to-server) are unaffected — CORS is a browser mechanism, never
+  authentication.
+- In production the form is served from the **same origin** as
+  `/webhook/*` (Caddy proxies `https://<domain>/webhook/*` to loopback n8n),
+  so browsers never hit a cross-origin case at all: no preflight, no CORS
+  headers relied upon. The browser drill asserted exactly that — the
+  same-origin submission emitted **zero `OPTIONS` requests** and still got
+  `201`.
 
 ### Response handling
 
@@ -677,6 +704,22 @@ The file ships a stable `"id": "lead-intake"`, which makes the CLI import an
 second one. (`n8n import:workflow` on a single file requires an `id`; without
 it the CLI fails with `NOT NULL constraint failed: workflow_entity.id`.)
 
+**Use the shipped script for deployments:** `deploy/bin/import-workflow.sh`
+runs the two steps offline (self-loads `deploy/env/n8n.env`, idempotent) and
+tells you to restart afterwards.
+
+**Publications are asynchronous — always import offline, then restart
+(learned while validating M12 against n8n 2.41.7):** `publish:workflow`
+enqueues a publication (`workflow_publication_outbox`) that the *running*
+instance applies seconds later, and a freshly started instance first serves
+its previously applied version before reconciling to the new
+`activeVersionId` — executions in that window record the **old** content.
+The CLI says as much (*"Changes will not take effect if n8n is running"*).
+`deploy/bin/stack.sh start` therefore waits (up to 120 s) for the applied
+pointer to equal the desired active version and the outbox to drain, and
+fails loudly if it does not — "stack up" implies "the imported workflow is
+what executes".
+
 | URL | When it works |
 |---|---|
 | `POST {n8n}/webhook/lead-intake` | workflow **published/Active** (production executions) |
@@ -701,8 +744,10 @@ Two n8n 2.x port facts worth knowing (both hit while testing this workflow):
 
 In scope: this single intake workflow (intake + qualification routing +
 operational/audit records + Telegram delivery of the two actionable records),
-the local demo lead form that feeds its webhook (Milestone 11), and the
-boundary they define.
+the local demo lead form that feeds its webhook (Milestone 11), the
+reproducible deployment of exactly this boundary (Milestone 12: env files,
+systemd, Caddy same-origin fronting, healthcheck/smoke/failure drills — see
+[`docs/deployment.md`](deployment.md)), and the boundary they define.
 
 Out of scope for these milestones (later work): any delivery channel besides
 the single-destination Telegram send of Milestone 10 (email/Slack/CRM/
@@ -710,11 +755,38 @@ webhook-out — Telegram was deliberately the first and only channel),
 recipient lookup or multi-tenant/multi-channel notifications, persisting the
 audit event (no table, no endpoint — that is deliberate), enrichment,
 scheduled follow-ups, retries and queues, authentication, rate limiting,
-Docker, additional workflows. A deployed/public frontend, accounts and any
-production hosting of the demo form are out of scope as well: the form is a
-local demo artifact served by a throwaway static server.
+Docker, additional workflows. A product frontend, accounts and any
+multi-tenant hosting are out of scope as well: the form is this pipeline's
+lead source — served locally by a throwaway static server in development
+and by the deployment's rendered copy (`var/www` behind Caddy) when
+deployed. No public hosting was performed; the verified/unverified ledger is
+in [`docs/deployment.md`](deployment.md).
 
 ## Verification
+
+### Milestone 12 — deployment rehearsal (local, production-shaped)
+
+Environment: a fresh throwaway PostgreSQL 16 cluster (own data dir,
+dedicated `lead_app` role — proves fresh-database startup migrates itself),
+FastAPI on `:8010`, n8n 2.41.7 on `:5678` with a **pristine data folder**
+(proves first-run provisioning: offline import → publish → start → webhook
+registered), Caddy 2.11.7 on `:8080` via `deploy/caddy/Caddyfile.local`
+(identical routing to production, plain HTTP), and the rendered form served
+**same-origin** through the proxy. Two batteries, both green:
+
+| Battery | Result |
+|---|---|
+| Non-destructive A: stack stop/start (registration-lag retry observed at attempt 1/6), Caddy form + `config.js` 200, `healthcheck.sh`, `migrate.sh` idempotent re-run, **smoke through the proxy 11/11** (not-qualified/qualified incl. real Telegram `ok:true`, duplicate `409`, invalid `422`, cleanup), CORS probes (allowed origin → `204`+matching ACAO; denied origin → mismatched ACAO; no-Origin POST processed), headless-Chrome same-origin submission → `201` with **zero `OPTIONS` preflights** + success panel + console `[lead-form] response: 201 created`, headless-Chrome missing-`config.js` → visible setup error + **0 POSTs**, restart persistence (`workflow: [('lead-intake',1)]`, `webhook: [('lead-intake','POST')]`) | all pass, exit 0 |
+| Failure drills B: FastAPI down → `502 upstream_error` + no row + no Telegram + `Respond Upstream Error` execution; PostgreSQL down → `/health 503` + healthcheck fails naming `503` + full recovery after restart; Telegram destination faulted → intake `201` + row intact + execution terminal `status=error` (fault version verified as the *applied* one before submitting, clean version verified byte-for-byte after restore); scoring unavailable → `201` + `score=NULL` + `Log Manual Review` + real manual-review Telegram | **29/29**, exit 0 |
+
+Supporting checks: `pytest -q` → **83 passed** (no test changes); `git diff
+n8n/lead-intake.json` = only `options.allowedOrigins`; both Caddyfiles pass
+`caddy validate` + `caddy fmt`; `systemd-analyze verify` (path-adapted unit
+copies) exit 0; secret scan of tracked files clean (chat id, encryption key,
+DSN password, bot-token pattern absent). Discovered and fixed during this
+milestone: n8n's asynchronous publication outbox (stale-version execution
+window after import) — `stack.sh start` now waits for convergence; see
+[`docs/deployment.md`](deployment.md) for the ledger.
 
 ### Milestone 11 — run personally in a real browser against the live stack
 
