@@ -1,11 +1,17 @@
 # =====================================================================
-# Local rehearsal of the production topology (plain HTTP on :8080).
+# Production routing shape without ACME TLS (plain HTTP, loopback only).
 #
-#   http://localhost:8080/            -> rendered lead form (var/www)
-#   http://localhost:8080/webhook/*   -> local n8n
+#   http://127.0.0.1:8080/            -> rendered lead form (var/www)
+#   http://127.0.0.1:8080/webhook/*   -> local n8n
 #
-# This is the SAME routing shape as the production Caddyfile, without
-# TLS/domain — used to validate same-origin form submission end-to-end.
+# SAME routing shape as the production Caddyfile. Used in two ways:
+#
+#   * local rehearsal / tests (Caddyfile.local as-is)
+#   * Milestone 13 public edge: a tunnel forwards its public HTTPS
+#     listener to 127.0.0.1:8080, so TLS terminates at the platform
+#     edge and the loopback hop carries the request to Caddy. The
+#     site block binds loopback-only so nothing is reachable on LAN
+#     interfaces besides the intended edge.
 #
 #   LEAD_WWW_ROOT=$PWD/var/www \
 #     caddy run --config deploy/caddy/Caddyfile.local
@@ -15,6 +21,11 @@
 }
 
 :8080 {
+	# Loopback-only listener: the site address host would become a Host
+	# matcher (breaking localhost vs 127.0.0.1), so restrict the actual
+	# bind here. Only local processes (tests, edge tunnel) can connect.
+	bind 127.0.0.1
+
 	encode gzip
 
 	handle /webhook/* {
