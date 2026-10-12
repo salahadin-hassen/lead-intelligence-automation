@@ -9,14 +9,13 @@ How the stack is deployed, configured and verified — and, just as important,
 |---|---|
 | Deployment-ready configuration: scripts, systemd units, reverse-proxy config, env templates, docs | **yes** |
 | Public deployment personally verified (real domain, issued TLS, systemd boot on a server) | **no** |
+| Temporary protected Cloudflare Quick Tunnel demo personally verified | **yes (2026-10-12; temporary)** |
 
-Everything marked *verified* below was executed on this machine against a
-production-shaped local rehearsal (topology in
-[Verification ledger](#verification-ledger)). No cloud host was provisioned,
-no DNS record or TLS certificate was created, and this machine offers no
-`sudo`/systemd boot — those portions are configuration-reviewed only and are
-listed as unverified. The deployment-ready claim comes from running the whole
-stack with production-like configuration, not from the files existing.
+The permanent deployment status remains unverified: no cloud host, DNS record,
+or persistent TLS endpoint was provisioned, and this machine offers no
+`sudo`/systemd boot. The temporary demo below was separately verified through
+an authenticated browser over a Cloudflare Quick Tunnel on 2026-10-12. That
+temporary verification is not evidence of a permanent production deployment.
 
 ## Architecture
 
@@ -192,6 +191,113 @@ Rules (enforced by `.gitignore`: `*.env`, `.env`, `.env.*`, `var/`, with the
 copy-template hint; API `/health` or n8n `/healthz` not answering in time →
 die with the log tail; workflow publication not converged → die (next
 section); final `healthcheck.sh` failure → die. "started" means usable.
+
+## Temporary protected public demo (Cloudflare Quick Tunnel)
+
+A Quick Tunnel is a temporary, zero-cost testing path, not a permanent
+deployment: it assigns a changing `trycloudflare.com` hostname and stops
+working when `cloudflared` exits. Do not use `--allowed-mail` with the
+current `cloudflared` release: email PIN authentication has produced a
+Cloudflare 401 on same-origin webhook POSTs after the form loaded
+(upstream [cloudflared issue #1752](https://github.com/cloudflare/cloudflared/issues/1752)).
+The supported workaround for this controlled demo is Caddy HTTP Basic
+Authentication at the loopback origin, before either static files or
+webhooks are served. The normal account-less Quick Tunnel itself is not
+an access control. See the official
+[Quick Tunnel documentation](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
+and [cloudflared download instructions](https://developers.cloudflare.com/tunnel/downloads/).
+
+Before starting, confirm the intended rehearsal PostgreSQL, API, n8n, and
+Caddy ports from the current `deploy/env/*.env` files and require
+`deploy/bin/healthcheck.sh` to pass. Do not substitute a development or
+unidentified database. `Caddyfile.local` binds only to `127.0.0.1:8080`
+and applies Basic Authentication before all routes, including the form,
+`config.js`, static files, and `/webhook/*`. The webhook proxy removes the
+`Authorization` header before sending the request to n8n. Caddy does not
+proxy FastAPI, PostgreSQL, or the n8n editor. Keep
+`DEMO_N8N_WEBHOOK_URL=/webhook/lead-intake` so the form POST stays
+same-origin and traverses the authenticated Caddy listener.
+
+After installing Caddy and `cloudflared` from their official sources, create
+the one-time local reviewer credentials, start only the verified rehearsal
+stack, validate Caddy, and start it:
+
+```sh
+deploy/bin/create-demo-auth.sh
+deploy/bin/stack.sh start
+deploy/bin/healthcheck.sh
+deploy/bin/run-demo-caddy.sh validate
+deploy/bin/run-demo-caddy.sh
+```
+
+`var/demo-auth.json` contains the generated username, random password, and
+Argon2id hash; it is ignored by Git, owned by the local user, and mode
+`0600`. Do not copy it into the repository's tracked files, logs, or a URL.
+Give the password only to an authorized reviewer through a private local
+channel. The Caddy launcher loads only the username and hash into its
+environment; the plaintext password is not passed to Caddy or placed in its
+process arguments.
+
+In a separate terminal, start the normal Quick Tunnel, with no email gate:
+
+```sh
+mkdir -p var/run var/log
+cloudflared tunnel --url http://127.0.0.1:8080 \
+  --logfile "$PWD/var/log/cloudflared-demo.log" \
+  --pidfile "$PWD/var/run/cloudflared-demo.pid"
+```
+
+Open the generated HTTPS URL in a fresh browser context. Enter the Caddy
+Basic Authentication credentials at the browser prompt; never place them in
+the URL. Test with synthetic data only. Keep the laptop awake and online and
+leave Caddy and `cloudflared` running for the demo. To shut it down, stop
+only the recorded tunnel and Caddy processes:
+
+```sh
+kill "$(cat var/run/cloudflared-demo.pid)"
+kill "$(cat var/run/caddy-demo.pid)"
+# Only if this demo started the API and n8n:
+deploy/bin/stack.sh stop
+```
+
+Stopping the tunnel invalidates its URL; the next run receives a different
+hostname.
+
+This protects both the form and webhook with local Caddy authentication; it
+does not add application authentication, abuse controls, tenant isolation,
+or production privacy guarantees. The app handles lead PII, so use no real
+customer data. Quick Tunnels have no uptime guarantee and are not suitable
+for client production traffic. A Quick Tunnel does not change the permanent
+public deployment status above.
+
+Verification ledger for this demo (2026-10-12):
+
+- **Locally verified:** rehearsal API/PostgreSQL/n8n health; Caddy validates
+  with Argon2id Basic Authentication and remains bound to `127.0.0.1:8080`.
+  Unauthenticated `GET /`, `GET /config.js`, and `POST /webhook/lead-intake`
+  each returned 401; the n8n execution ID did not advance. Authenticated GETs
+  of the form and configuration returned 200, and an authenticated empty
+  webhook probe reached n8n and returned the expected 422. The captured n8n
+  execution did not contain an `Authorization` header.
+- **Publicly verified:** the temporary normal Quick Tunnel served the form
+  after Caddy Basic Authentication. A synthetic qualified browser submission
+  returned 201, FastAPI returned 201, score 100 was persisted, n8n recorded
+  `lead_qualified` and ran the priority route, and the Telegram node completed
+  successfully with a returned message ID. A not-qualified submission returned
+  201 with score 48, persisted an audit event and ran `Log Normal Route`
+  without running a Telegram notification node. Repeating the same source and
+  `external_id` returned 409 with the duplicate panel. An unauthenticated
+  public POST returned 401 and created no n8n execution or row.
+- **Additional synthetic result:** an earlier, longer low-intent message scored
+  73 (above threshold 70), so the existing rules correctly classified it as
+  qualified and sent a Telegram notification. That observation is why the
+  not-qualified test used a genuinely short, low-intent message. Both qualified
+  execution results returned Telegram message IDs. These synthetic leads were
+  all removed through the existing API after verification.
+- **Not verified:** permanent production deployment, uptime, general
+  authentication/abuse protection, production handling of real customer PII,
+  and behavior after this temporary tunnel is stopped. Synthetic verification
+  rows were removed through the existing API after inspection.
 
 ## Health & smoke verification
 

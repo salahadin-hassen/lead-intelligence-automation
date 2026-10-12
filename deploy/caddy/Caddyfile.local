@@ -1,10 +1,12 @@
 # =====================================================================
-# Production routing shape without ACME TLS (plain HTTP, loopback only).
+# Demo routing shape without ACME TLS (plain HTTP, loopback only).
 #
 #   http://127.0.0.1:8080/            -> rendered lead form (var/www)
 #   http://127.0.0.1:8080/webhook/*   -> local n8n
 #
-# SAME routing shape as the production Caddyfile. Used in two ways:
+# Used only for the locally hosted, authenticated demo. A tunnel forwards
+# public HTTPS to this loopback listener; Basic Authentication remains
+# enabled at this origin.
 #
 #   * local rehearsal / tests (Caddyfile.local as-is)
 #   * Milestone 13 public edge: a tunnel forwards its public HTTPS
@@ -28,8 +30,14 @@
 
 	encode gzip
 
+	basic_auth argon2id {
+		{$DEMO_AUTH_USER} {$DEMO_AUTH_HASH}
+	}
+
 	handle /webhook/* {
-		reverse_proxy 127.0.0.1:5678
+		reverse_proxy 127.0.0.1:5678 {
+			header_up -Authorization
+		}
 	}
 
 	handle {
