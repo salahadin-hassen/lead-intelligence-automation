@@ -2,7 +2,7 @@
 
 ## 1. Project Overview
 
-**Lead Intelligence Automation** is an automated inbound lead ingestion, qualification, and routing system. It captures B2B prospective customer inquiries through a web contact form, enforces schema and duplicate validation, persists records in PostgreSQL 16, scores purchase intent using a hybrid LLM and heuristic engine, and dispatches real-time sales alerts via Telegram.
+**Lead Intelligence Automation** is an automated inbound lead ingestion, qualification, and routing system. It captures B2B prospective customer inquiries through a web contact form, enforces schema and duplicate validation, persists records in PostgreSQL 16, scores purchase intent using a hybrid LLM and heuristic engine, and dispatches real-time sales alerts via Telegram and WhatsApp Business Cloud API.
 
 The system was engineered as a portfolio-grade reference architecture for businesses looking to automate lead intake without sacrificing software reliability, data integrity, or observability.
 
@@ -51,8 +51,8 @@ In typical sales and marketing operations, inbound inquiries from web forms are 
 - **Trade-off:** Local heuristic scoring requires maintaining a ruleset in code, but guarantees that intake never halts due to third-party AI downtime or quota exhaustion.
 
 ### Decision 4: Caller-Response Isolation
-- **Rationale:** A lead submission should be confirmed to the customer as soon as it is safely recorded. Operational failures in downstream notifications (e.g., Telegram API rate limits) must not return a fake HTTP 500 error to a prospect whose lead was successfully saved.
-- **Implementation:** In n8n's execution graph, `Respond Created` is executed immediately upon receiving FastAPI's 201 response. Downstream qualification, audit event creation, and Telegram notifications execute in parallel/subsequent branches.
+- **Rationale:** A lead submission should be confirmed to the customer as soon as it is safely recorded. Operational failures in downstream notifications (e.g., Telegram API rate limits or Meta WhatsApp API outages) must not return a fake HTTP 500 error to a prospect whose lead was successfully saved.
+- **Implementation:** In n8n's execution graph, `Respond Created` is executed immediately upon receiving FastAPI's 201 response. Downstream qualification, audit event creation, Telegram, and WhatsApp notifications execute in parallel/subsequent branches with node-level error boundaries (`onError: continueErrorOutput`).
 - **Trade-off:** Requires careful management of n8n's canvas layout and node execution order, but guarantees the prospect always receives an honest `201 Created` status code.
 
 ---

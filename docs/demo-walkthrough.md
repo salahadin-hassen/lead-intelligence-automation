@@ -64,13 +64,13 @@
 
 ---
 
-### 1:55 – 2:25 | Step 4: Operational Audit & Telegram Notification
-**On Screen:** In n8n, click the `Build Audit Event` node output and `Send Qualified to Telegram` node. Show the structured JSON containing `event: lead_qualified`, `priority: high`, and Telegram response showing `ok: true`, `message_id: 25`.
+### 1:55 – 2:25 | Step 4: Operational Audit, Telegram & WhatsApp Notifications
+**On Screen:** In n8n, click the `Build Audit Event` node output, `Send Qualified to Telegram`, and `Send Qualified to WhatsApp` nodes. Show the structured JSON containing `event: lead_qualified`, `priority: high`, and Telegram response showing `ok: true`, `message_id: 25`.
 
 **Spoken Narration:**
 > "For operational visibility, every processed lead generates an execution-native audit event with full provenance and a human-readable summary.
 >
-> For actionable outcomes—qualified leads and unscored leads requiring manual review—the system dispatches a formatted alert to our sales Telegram chat. In verified test runs (such as execution 135), the Telegram Bot API confirmed delivery with a message ID.
+> For actionable outcomes—qualified leads and unscored leads requiring manual review—the system dispatches formatted alerts to both our sales Telegram chat and WhatsApp Business Cloud API. In verified test runs (such as execution 135), the Telegram Bot API confirmed delivery with a message ID.
 >
 > Low-intent leads scoring below 70 route to normal logging without interrupting the sales team."
 
@@ -84,7 +84,7 @@
 >
 > First, our AI scorer has an automatic fallback: if OpenRouter or OpenAI times out or fails, the system switches seamlessly to a local, deterministic heuristic scorer—intake never breaks.
 >
-> Second, we engineered caller-response isolation: `Respond Created` executes *before* downstream audit or Telegram alerts. If Telegram experiences an outage, the lead is already safe in PostgreSQL and the prospect receives their 201 confirmation. The failure is isolated and visible to operators in n8n logs."
+> Second, we engineered caller-response isolation: `Respond Created` executes *before* downstream audit, Telegram, or WhatsApp alerts. If external messaging providers experience an outage, the lead is already safe in PostgreSQL and the prospect receives their 201 confirmation. The failure is isolated and visible to operators in n8n logs."
 
 ---
 

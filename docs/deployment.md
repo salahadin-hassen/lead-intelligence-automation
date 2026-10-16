@@ -34,7 +34,7 @@ Caddy :80/:443
                            │
                            └ scoring: offline heuristic (default) or
                              OpenAI-compatible endpoint (optional)
-                  n8n ──→ Telegram Bot API (outbound HTTPS, one chat)
+                  n8n ──→ Telegram Bot & WhatsApp Cloud API (outbound HTTPS)
 ```
 
 Design decisions, chosen from this repo's reality rather than fashion:
@@ -156,7 +156,7 @@ success. That is the path used for the validation below.
 | File | Loaded by | Contains |
 |---|---|---|
 | `deploy/env/api.env` | systemd `EnvironmentFile=`, `stack.sh`, `run-api.sh` consumers | `DATABASE_URL`, `API_HOST/API_PORT`, optional `OPENAI_*` |
-| `deploy/env/n8n.env` | systemd `EnvironmentFile=`, `stack.sh`, `import-workflow.sh` (fallback) | bind address/port, `N8N_WEBHOOK_URL`, `N8N_USER_FOLDER`, `N8N_ENCRYPTION_KEY`, `LEAD_API_BASE_URL`, `LEAD_QUALIFIED_THRESHOLD`, `N8N_BLOCK_ENV_ACCESS_IN_NODE`, `TELEGRAM_CHAT_ID` |
+| `deploy/env/n8n.env` | systemd `EnvironmentFile=`, `stack.sh`, `import-workflow.sh` (fallback) | bind address/port, `N8N_WEBHOOK_URL`, `N8N_USER_FOLDER`, `N8N_ENCRYPTION_KEY`, `LEAD_API_BASE_URL`, `LEAD_QUALIFIED_THRESHOLD`, `N8N_BLOCK_ENV_ACCESS_IN_NODE`, `TELEGRAM_CHAT_ID`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_RECIPIENT_PHONE_NUMBER` |
 | `deploy/env/form.env` | `render-form.sh` (via `stack.sh`) | `DEMO_N8N_WEBHOOK_URL` |
 
 Rules (enforced by `.gitignore`: `*.env`, `.env`, `.env.*`, `var/`, with the

@@ -66,14 +66,21 @@ Lead form (demo/lead-form.html) · curl · any other client
         ▼
   caller receives an envelope that mirrors the API result
 
-  Telegram notification chains (Milestone 10) — appended to two branch
-  outputs only, positioned BELOW Build Audit Event on the canvas so the
-  audit event always executes first (top-most sibling runs first):
+  Notification chains — appended to two branch outputs only, positioned
+  BELOW Build Audit Event on the canvas so the audit event always executes
+  first (top-most sibling runs first):
 
-    Log Priority Route ─► Build Qualified Notification ─► Send Qualified to Telegram
-    Log Manual Review  ─► Build Manual Review Notification ─► Send Manual Review to Telegram
+    Log Priority Route ─┬─► Build Qualified Notification ─► Send Qualified to Telegram
+                        └─► Build Qualified WhatsApp Notification ─► Send Qualified to WhatsApp
+                                ├─► (success) ──► Log WhatsApp Qualified Success
+                                └─► (error)   ──► Log WhatsApp Qualified Failure
 
-    not_qualified · 409 · 422 · 502  →  no Telegram node is reachable
+    Log Manual Review  ─┬─► Build Manual Review Notification ─► Send Manual Review to Telegram
+                        └─► Build Manual Review WhatsApp Notification ─► Send Manual Review to WhatsApp
+                                ├─► (success) ──► Log WhatsApp Manual Review Success
+                                └─► (error)   ──► Log WhatsApp Manual Review Failure
+
+    not_qualified · 409 · 422 · 502  →  no Telegram or WhatsApp node is reachable
 ```
 
 The 201 branch **fans out**: `Respond Created` answers the caller exactly as
@@ -92,13 +99,16 @@ continuing past a `respondToWebhook` node.
 | `Create Lead in FastAPI` | `POST {apiLeadsUrl}` with a JSON body. `fullResponse` so the status code survives, `neverError` so a 409/422 continues down the graph instead of failing the execution, `onError: continueRegularOutput` so an unreachable API still reaches the fallback branch, `timeout: 10000`, **no retries**. |
 | `Route on API Status` | Branches on the HTTP status FastAPI actually returned; anything else (500, 503, connection refused, timeout) goes to the fallback output. Only the 201 branch continues into qualification. |
 | `Respond *` | One Respond-to-Webhook node per outcome, each with its own response code and envelope. |
-| `Extract Lead + Score` | Reads the 201 body of `Create Lead in FastAPI` and normalizes it into the routing base result (`leadId`, `company`, `source`, `score`, `scoreReason`). The score is copied, not interpreted: anything FastAPI did not return as a finite number stays `null` (never `0`, never a guess). |
+| `Extract Lead + Score` | Reads the 201 body of `Create Lead in FastAPI` and normalizes it into the routing base result (`leadId`, `name`, `email`, `company`, `source`, `score`, `scoreReason`). The score is copied, not interpreted: anything FastAPI did not return as a finite number stays `null` (never `0`, never a guess). |
 | `Qualification` | **The one place the threshold rule is applied** (see Qualification rule). Labels the lead `qualified` / `not_qualified` / `manual_review` and attaches `priority` (`high` / `normal` / `null`). Reads the threshold from `Prepare Lead Payload` — it does not define or repeat it. |
 | `Route on Qualification` | Switch (string equality on `qualification`) with a defensive fallback output; the fallback — a state the decision node should never emit — is wired to `Log Manual Review`, so an unknown state goes to a human instead of being dropped. |
 | `Log Priority Route` / `Log Normal Route` / `Log Manual Review` | The three operational branches. Each emits its **operational record** (`event`, lead data, `reason`, threshold provenance) *plus a human-readable `summary`* as its node output, which n8n persists in the execution data (see Operational actions & audit event). |
 | `Build Audit Event` | Terminal merge of whichever branch ran: adds `timestamp` (n8n's `$now`), `executionId` and `executionMode` to the record, producing the **unified audit event** — the structured hand-off point a consumer (email, Slack, CRM, analytics) would attach to. |
 | `Build Qualified Notification` / `Build Manual Review Notification` | Milestone 10. Code nodes appended to `Log Priority Route` / `Log Manual Review`: render the **existing branch record** into a plain-text Telegram message (real fields only — company, lead ID, score, qualification, source, plus `reason` for manual review) and resolve the destination chat from `$env.TELEGRAM_CHAT_ID` (explicit throw if it is missing or `$env` is blocked). Output = the record **unchanged** plus exactly two added keys: `chatId`, `telegramMessage`. |
-| `Send Qualified to Telegram` / `Send Manual Review to Telegram` | Milestone 10. `n8n-nodes-base.telegram` (`sendMessage`, typeVersion `1.2`), `chatId`/`text` as expressions off the build node's output, one `telegramApi` credential reference (id + name only — the token lives in n8n's credential store), **no `onError` override** so a delivery failure surfaces as a failed execution while the caller keeps its `201`. |
+| `Send Qualified to Telegram` / `Send Manual Review to Telegram` | Milestone 10. `n8n-nodes-base.telegram` (`sendMessage`, typeVersion `1.2`), `chatId`/`text` as expressions off the build node's output, one `telegramApi` credential reference (id + name only — the token lives in n8n's credential store). |
+| `Build Qualified WhatsApp Notification` / `Build Manual Review WhatsApp Notification` | Formats concise, privacy-conscious internal operator alerts (lead ID, name, company, email, score, source; free-text message omitted). Reads `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_RECIPIENT_PHONE_NUMBER` via `$env`. |
+| `Send Qualified to WhatsApp` / `Send Manual Review to WhatsApp` | Native `n8n-nodes-base.whatsApp` node (`message` resource, `send` operation). Uses `whatsAppApi` credentials (`whatsapp-lead-alerts`). Configures `onError: continueErrorOutput` to guarantee isolated failure resilience. |
+| `Log WhatsApp Qualified / Manual Review Success / Failure` | Terminal logging nodes capturing delivery outcomes in execution data (`whatsapp_qualified_sent`, `whatsapp_qualified_failed`, etc.). |
 
 ## Configuration
 
@@ -106,8 +116,10 @@ continuing past a `respondToWebhook` node.
 |---|---|---|---|
 | `LEAD_API_BASE_URL` | production | `http://localhost:8000` (constant at the top of the `Prepare Lead Payload` code node) | Base URL of the FastAPI service, **without** a trailing `/leads` |
 | `LEAD_QUALIFIED_THRESHOLD` | no | `70` (`DEFAULT_QUALIFIED_THRESHOLD`, same code node) | Score at which a lead is `qualified` (integer 0–100; out-of-range/invalid values are ignored and the default is used) |
-| `TELEGRAM_CHAT_ID` | for notifications | — (no default: a destination must be configured) | Single destination chat for both Telegram sends; read via `$env` **inside the two build nodes**, which throw explicitly when it is unset or `$env` is blocked — a configuration error then shows up as a failed execution, never as a silent no-send and never as a caller error |
-| `N8N_BLOCK_ENV_ACCESS_IN_NODE` | no | *(unset = blocked on n8n 2.x)* | Set to `false` to let the workflow read `LEAD_API_BASE_URL` / `LEAD_QUALIFIED_THRESHOLD` **and** `TELEGRAM_CHAT_ID` |
+| `TELEGRAM_CHAT_ID` | for Telegram | — (no default: a destination must be configured) | Destination chat ID for Telegram alerts; read via `$env` inside the Telegram build nodes |
+| `WHATSAPP_PHONE_NUMBER_ID` | for WhatsApp | — (no default) | Meta Phone Number ID from Meta Developer Console (WhatsApp > API Setup) |
+| `WHATSAPP_RECIPIENT_PHONE_NUMBER` | for WhatsApp | — (no default) | Destination operator phone number in E.164 format without `+` (e.g. `15551234567`) |
+| `N8N_BLOCK_ENV_ACCESS_IN_NODE` | no | *(unset = blocked on n8n 2.x)* | Set to `false` to let the workflow read `LEAD_API_BASE_URL`, `LEAD_QUALIFIED_THRESHOLD`, `TELEGRAM_CHAT_ID`, and `WHATSAPP_*` |
 
 **Deployment:** none of this is exported by hand — a deployment keeps these
 values in the gitignored `deploy/env/n8n.env` (template:

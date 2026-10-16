@@ -231,7 +231,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Normalize the successful (201) API response into the routing base\n// result. FastAPI owns scoring - this node only copies the score it\n// returned. score stays null when FastAPI could not score the lead; it\n// is never coerced to 0 and never invented here.\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\n\nconst rawScore = body.score;\nconst score = (typeof rawScore === 'number' && Number.isFinite(rawScore))\n  ? rawScore\n  : null;\n\nreturn [{\n  json: {\n    apiStatus: typeof http.statusCode === 'number' ? http.statusCode : null,\n    leadId: body.lead_id ?? null,\n    company: body.company ?? null,\n    source: body.source ?? null,\n    score,\n    scoreReason: body.score_reason ?? null,\n  },\n}];"
+        "jsCode": "// Normalize the successful (201) API response into the routing base\n// result. FastAPI owns scoring - this node only copies the score it\n// returned. score stays null when FastAPI could not score the lead; it\n// is never coerced to 0 and never invented here.\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\n\nconst rawScore = body.score;\nconst score = (typeof rawScore === 'number' && Number.isFinite(rawScore))\n  ? rawScore\n  : null;\n\nreturn [{\n  json: {\n    apiStatus: typeof http.statusCode === 'number' ? http.statusCode : null,\n    leadId: body.lead_id ?? null,\n    name: body.name ?? null,\n    email: body.email ?? null,\n    company: body.company ?? null,\n    source: body.source ?? null,\n    score,\n    scoreReason: body.score_reason ?? null,\n  },\n}];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000009",
       "name": "Extract Lead + Score",
@@ -347,7 +347,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Priority-branch operational record (Milestone 9) for a qualified lead.\n// The record below IS this node's output: n8n persists it in the execution\n// data, where an operator can inspect it in the execution view. It is a\n// workflow-native operational record, NOT an external notification - this\n// environment has no email/Slack/Telegram/CRM integration and none is\n// faked here. `event` names the operational action for downstream\n// consumers; `summary` is the human-readable rendering of the same values.\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'lead_qualified',\n  leadId: lead.leadId ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'qualified',\n  priority: lead.priority ?? null,\n  reason: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'HIGH PRIORITY LEAD',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
+        "jsCode": "// Priority-branch operational record (Milestone 9) for a qualified lead.\n// The record below IS this node's output: n8n persists it in the execution\n// data, where an operator can inspect it in the execution view. It is a\n// workflow-native operational record, NOT an external notification.\n// `event` names the operational action for downstream consumers;\n// `summary` is the human-readable rendering of the same values.\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'lead_qualified',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'qualified',\n  priority: lead.priority ?? null,\n  reason: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'HIGH PRIORITY LEAD',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000012",
       "name": "Log Priority Route",
@@ -361,7 +361,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Not-qualified branch operational record (Milestone 9): the score is\n// below the configured threshold. Same delivery mechanism as the priority\n// branch - the record is this node's output, persisted in n8n's execution\n// data. Workflow-native record, not an external notification.\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'lead_not_qualified',\n  leadId: lead.leadId ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'not_qualified',\n  priority: lead.priority ?? null,\n  reason: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'NOT QUALIFIED',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
+        "jsCode": "// Not-qualified branch operational record (Milestone 9): the score is\n// below the configured threshold. Same delivery mechanism as the priority\n// branch - the record is this node's output, persisted in n8n's execution\n// data. Workflow-native record, not an external notification.\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'lead_not_qualified',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'not_qualified',\n  priority: lead.priority ?? null,\n  reason: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'NOT QUALIFIED',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000013",
       "name": "Log Normal Route",
@@ -375,7 +375,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Manual-review branch operational record (Milestone 9): FastAPI could\n// not score the lead (score stays null) or the qualification state could\n// not be determined. The score is never replaced with 0 or a guess.\n// Same delivery mechanism as the other branches - the record is this\n// node's output, persisted in n8n's execution data. Workflow-native\n// record, not an external notification.\nconst lead = $input.first().json || {};\nconst score = (typeof lead.score === 'number' && Number.isFinite(lead.score))\n  ? lead.score\n  : null;\nconst reason = score === null\n  ? 'scoring unavailable'\n  : 'qualification could not be determined';\n\nconst record = {\n  event: 'lead_manual_review',\n  leadId: lead.leadId ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification || 'manual_review',\n  priority: lead.priority ?? null,\n  reason,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'MANUAL REVIEW REQUIRED',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n  `Reason: ${record.reason}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
+        "jsCode": "// Manual-review branch operational record (Milestone 9): FastAPI could\n// not score the lead (score stays null) or the qualification state could\n// not be determined. The score is never replaced with 0 or a guess.\n// Same delivery mechanism as the other branches - the record is this\n// node's output, persisted in n8n's execution data. Workflow-native\n// record, not an external notification.\nconst lead = $input.first().json || {};\nconst score = (typeof lead.score === 'number' && Number.isFinite(lead.score))\n  ? lead.score\n  : null;\nconst reason = score === null\n  ? 'scoring unavailable'\n  : 'qualification could not be determined';\n\nconst record = {\n  event: 'lead_manual_review',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? null,\n  score,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification || 'manual_review',\n  priority: lead.priority ?? null,\n  reason,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null,\n  thresholdSource: lead.thresholdSource ?? null,\n};\n\nconst summary = [\n  'MANUAL REVIEW REQUIRED',\n  `Company: ${record.company}`,\n  `Lead ID: ${record.leadId}`,\n  `Score: ${record.score}`,\n  `Source: ${record.source}`,\n  `Qualification: ${record.qualification}`,\n  `Reason: ${record.reason}`,\n].join('\\n');\n\nreturn [{ json: { ...record, summary } }];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000014",
       "name": "Log Manual Review",
@@ -480,6 +480,140 @@
       "position": [
         2160,
         -320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// WhatsApp notification for a qualified lead.\n// Formatted concisely for internal operator/sales alerting: lead name, company,\n// lead ID, score, source, and contact email. Free-text message is omitted\n// to minimize sensitive lead data exposure.\nconst record = $input.first().json || {};\n\nlet phoneNumberId = null;\nlet recipient = null;\ntry {\n  const rawId = $env.WHATSAPP_PHONE_NUMBER_ID;\n  if (rawId !== undefined && rawId !== null && String(rawId).trim() !== '') {\n    phoneNumberId = String(rawId).trim();\n  }\n  const rawRecipient = $env.WHATSAPP_RECIPIENT_PHONE_NUMBER;\n  if (rawRecipient !== undefined && rawRecipient !== null && String(rawRecipient).trim() !== '') {\n    recipient = String(rawRecipient).trim();\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE): handled below.\n}\n\nconst name = record.name ? String(record.name) : 'Not provided';\nconst company = record.company ? String(record.company) : 'Not specified';\nconst email = record.email ? String(record.email) : 'Not provided';\nconst score = (typeof record.score === 'number' && Number.isFinite(record.score))\n  ? record.score\n  : 'N/A';\n\nconst message = [\n  '\\u{1F525} QUALIFIED LEAD ALERT',\n  '',\n  `Lead ID: ${record.leadId ?? 'N/A'}`,\n  `Name: ${name}`,\n  `Company: ${company}`,\n  `Email: ${email}`,\n  `Score: ${score}`,\n  `Source: ${record.source ?? 'N/A'}`,\n  '',\n  'Action: Review lead details and initiate priority follow-up.',\n].join('\\n');\n\nreturn [{\n  json: {\n    ...record,\n    whatsappPhoneNumberId: phoneNumberId || 'UNCONFIGURED_PHONE_NUMBER_ID',\n    whatsappRecipient: recipient || 'UNCONFIGURED_RECIPIENT',\n    whatsappMessage: message,\n    whatsappConfigured: Boolean(phoneNumberId && recipient),\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000020",
+      "name": "Build Qualified WhatsApp Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "={{ $json.whatsappPhoneNumberId }}",
+        "recipientPhoneNumber": "={{ $json.whatsappRecipient }}",
+        "textBody": "={{ $json.whatsappMessage }}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "whatsapp-lead-alerts",
+          "name": "WhatsApp Lead Alerts"
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000021",
+      "name": "Send Qualified to WhatsApp",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        -240
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json || {};\nreturn [{\n  json: {\n    event: 'whatsapp_qualified_sent',\n    leadId: item.leadId ?? null,\n    recipient: item.whatsappRecipient ?? null,\n    timestamp: $now.toISO(),\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000022",
+      "name": "Log WhatsApp Qualified Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json || {};\nreturn [{\n  json: {\n    event: 'whatsapp_qualified_failed',\n    leadId: item.leadId ?? null,\n    error: (item.error && item.error.message) || item.message || 'WhatsApp notification delivery failed',\n    timestamp: $now.toISO(),\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000023",
+      "name": "Log WhatsApp Qualified Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// WhatsApp notification for a lead requiring manual review.\n// Concise, privacy-conscious internal operator alert.\n// Score status is clearly reported (including unavailable when null).\n// Free-text message is omitted to minimize external data exposure.\nconst record = $input.first().json || {};\n\nlet phoneNumberId = null;\nlet recipient = null;\ntry {\n  const rawId = $env.WHATSAPP_PHONE_NUMBER_ID;\n  if (rawId !== undefined && rawId !== null && String(rawId).trim() !== '') {\n    phoneNumberId = String(rawId).trim();\n  }\n  const rawRecipient = $env.WHATSAPP_RECIPIENT_PHONE_NUMBER;\n  if (rawRecipient !== undefined && rawRecipient !== null && String(rawRecipient).trim() !== '') {\n    recipient = String(rawRecipient).trim();\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE): handled below.\n}\n\nconst name = record.name ? String(record.name) : 'Not provided';\nconst company = record.company ? String(record.company) : 'Not specified';\nconst email = record.email ? String(record.email) : 'Not provided';\nconst score = (typeof record.score === 'number' && Number.isFinite(record.score))\n  ? record.score\n  : 'unavailable';\nconst reason = record.reason ? String(record.reason) : 'qualification could not be determined';\n\nconst message = [\n  '\\u26A0\\uFE0F LEAD NEEDS MANUAL REVIEW',\n  '',\n  `Lead ID: ${record.leadId ?? 'N/A'}`,\n  `Name: ${name}`,\n  `Company: ${company}`,\n  `Email: ${email}`,\n  `Score: ${score}`,\n  `Source: ${record.source ?? 'N/A'}`,\n  `Reason: ${reason}`,\n  '',\n  'Action: Inspect lead record in intake queue to determine routing.',\n].join('\\n');\n\nreturn [{\n  json: {\n    ...record,\n    whatsappPhoneNumberId: phoneNumberId || 'UNCONFIGURED_PHONE_NUMBER_ID',\n    whatsappRecipient: recipient || 'UNCONFIGURED_RECIPIENT',\n    whatsappMessage: message,\n    whatsappConfigured: Boolean(phoneNumberId && recipient),\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000024",
+      "name": "Build Manual Review WhatsApp Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "={{ $json.whatsappPhoneNumberId }}",
+        "recipientPhoneNumber": "={{ $json.whatsappRecipient }}",
+        "textBody": "={{ $json.whatsappMessage }}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "whatsAppApi": {
+          "id": "whatsapp-lead-alerts",
+          "name": "WhatsApp Lead Alerts"
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000025",
+      "name": "Send Manual Review to WhatsApp",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        -140
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json || {};\nreturn [{\n  json: {\n    event: 'whatsapp_manual_review_sent',\n    leadId: item.leadId ?? null,\n    recipient: item.whatsappRecipient ?? null,\n    timestamp: $now.toISO(),\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000026",
+      "name": "Log WhatsApp Manual Review Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const item = $input.first().json || {};\nreturn [{\n  json: {\n    event: 'whatsapp_manual_review_failed',\n    leadId: item.leadId ?? null,\n    error: (item.error && item.error.message) || item.message || 'WhatsApp notification delivery failed',\n    timestamp: $now.toISO(),\n  },\n}];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000027",
+      "name": "Log WhatsApp Manual Review Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -100
       ]
     }
   ],
@@ -620,6 +754,11 @@
             "node": "Build Qualified Notification",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Build Qualified WhatsApp Notification",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -647,6 +786,11 @@
             "node": "Build Manual Review Notification",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Build Manual Review WhatsApp Notification",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -667,6 +811,64 @@
         [
           {
             "node": "Send Manual Review to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Qualified WhatsApp Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Qualified to WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Qualified to WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Log WhatsApp Qualified Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log WhatsApp Qualified Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Review WhatsApp Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Manual Review to WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Manual Review to WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Log WhatsApp Manual Review Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log WhatsApp Manual Review Failure",
             "type": "main",
             "index": 0
           }

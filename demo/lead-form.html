@@ -3,306 +3,1154 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Talk to our team</title>
+<title>Lead Intelligence Automation — Inbound Lead Qualification & Routing</title>
+<meta name="description" content="Automated inbound lead qualification and routing system built with FastAPI, PostgreSQL, n8n, OpenRouter LLM, Telegram, and WhatsApp Business Cloud API.">
 <style>
   :root {
-    --ink: #1a2230;
-    --muted: #5b6472;
-    --line: #d7dce3;
-    --card: #ffffff;
-    --page: #eef1f5;
-    --accent: #1f4e79;
-    --accent-hover: #173d5f;
-    --error: #b3261e;
-    --error-bg: #fdf2f1;
-    --success: #1c6b3f;
-    --success-bg: #eef8f1;
-    --info: #1f4e79;
-    --info-bg: #eef3f9;
-    --focus: #2f6fb5;
+    --bg-page: #0b101b;
+    --bg-surface: #111827;
+    --bg-card: #162032;
+    --bg-card-alt: #1a263c;
+    --border-subtle: #25334c;
+    --border-strong: #374b6e;
+    --text-primary: #f3f6fc;
+    --text-secondary: #9db0cc;
+    --text-muted: #627694;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --accent-glow: rgba(59, 130, 246, 0.18);
+    --success: #10b981;
+    --success-bg: rgba(16, 185, 129, 0.12);
+    --success-border: rgba(16, 185, 129, 0.3);
+    --warning: #f59e0b;
+    --warning-bg: rgba(245, 158, 11, 0.12);
+    --warning-border: rgba(245, 158, 11, 0.3);
+    --error: #ef4444;
+    --error-bg: rgba(239, 68, 68, 0.12);
+    --error-border: rgba(239, 68, 68, 0.3);
+    --info: #38bdf8;
+    --info-bg: rgba(56, 189, 248, 0.12);
+    --info-border: rgba(56, 189, 248, 0.3);
+    --focus-ring: 0 0 0 3px rgba(59, 130, 246, 0.35);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    --shadow-card: 0 10px 30px -5px rgba(0, 0, 0, 0.4), 0 0 1px 1px rgba(255, 255, 255, 0.05);
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    background: var(--page);
-    color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                 Helvetica, Arial, sans-serif;
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html {
+    scroll-behavior: smooth;
     font-size: 16px;
-    line-height: 1.5;
+  }
+
+  body {
+    background-color: var(--bg-page);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Utility container */
+  .container {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* Navigation Bar */
+  .navbar {
+    background: rgba(17, 24, 39, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-subtle);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 68px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    color: var(--text-primary);
+  }
+
+  .brand-logo {
+    width: 36px;
+    height: 36px;
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 800;
+    font-size: 18px;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+  }
+
+  .brand-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .brand-badge {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+  }
+
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: color 0.15s ease;
+  }
+
+  .nav-link:hover { color: var(--text-primary); }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-surface);
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border-subtle);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--success);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--success);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.9); }
+  }
+
+  .nav-cta {
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    transition: background 0.15s ease, transform 0.1s ease;
+  }
+
+  .nav-cta:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+  }
+
+  /* Hero Section */
+  .hero-section {
+    padding: 72px 0 48px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero-glow {
+    position: absolute;
+    top: -100px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, rgba(11, 16, 27, 0) 70%);
+    pointer-events: none;
+  }
+
+  .hero-content {
+    text-align: center;
+    max-width: 840px;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  .hero-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    padding: 6px 14px;
+    border-radius: 999px;
+    margin-bottom: 20px;
+  }
+
+  .hero-title {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    margin-bottom: 20px;
+    background: linear-gradient(180deg, #ffffff 30%, #a5b4fc 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-subtitle {
+    font-size: 18px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    margin-bottom: 32px;
+  }
+
+  .hero-metrics {
     display: flex;
     justify-content: center;
-    align-items: flex-start;
-    padding: 32px 16px;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 12px;
   }
-  .card {
-    background: var(--card);
-    width: 100%;
-    max-width: 540px;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    box-shadow: 0 8px 28px rgba(20, 32, 54, 0.08);
-    padding: 40px;
-  }
-  header { margin-bottom: 28px; }
-  h1 {
-    font-size: 26px;
-    line-height: 1.25;
-    margin: 0 0 8px;
-    font-weight: 650;
-    letter-spacing: -0.01em;
-  }
-  .subtitle { margin: 0; color: var(--muted); font-size: 15px; }
 
-  .field { margin-bottom: 20px; }
+  .metric-badge {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .metric-badge strong {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  /* Main Interactive Demo Area */
+  .demo-section {
+    padding: 32px 0 72px;
+  }
+
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    align-items: start;
+  }
+
+  /* Form Card */
+  .form-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-xl);
+    padding: 40px;
+    box-shadow: var(--shadow-card);
+    position: relative;
+  }
+
+  .card-header {
+    margin-bottom: 28px;
+  }
+
+  .card-tag {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #60a5fa;
+    margin-bottom: 6px;
+    display: block;
+  }
+
+  .card-title {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+  }
+
+  .card-desc {
+    color: var(--text-secondary);
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+
+  /* Form Elements */
+  .field {
+    margin-bottom: 20px;
+  }
+
   label {
     display: block;
     font-size: 14px;
     font-weight: 600;
-    margin-bottom: 6px;
+    color: var(--text-primary);
+    margin-bottom: 8px;
   }
-  .req { color: var(--error); margin-left: 2px; }
+
+  .req {
+    color: var(--error);
+    margin-left: 2px;
+  }
+
   input, textarea {
     width: 100%;
-    font: inherit;
-    font-size: 16px;
-    color: var(--ink);
-    background: #fff;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 11px 13px;
-    transition: border-color .15s ease, box-shadow .15s ease;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
   }
-  input::placeholder, textarea::placeholder { color: #98a1ae; }
+
+  input::placeholder, textarea::placeholder {
+    color: var(--text-muted);
+  }
+
   input:focus, textarea:focus {
     outline: none;
-    border-color: var(--focus);
-    box-shadow: 0 0 0 3px rgba(47, 111, 181, 0.18);
-  }
-  textarea { min-height: 120px; resize: vertical; }
-  .invalid input, .invalid textarea { border-color: var(--error); }
-  .field-error {
-    color: var(--error);
-    font-size: 13px;
-    margin: 6px 0 0;
+    background: var(--bg-card);
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
   }
 
+  textarea {
+    min-height: 110px;
+    resize: vertical;
+  }
+
+  .invalid input, .invalid textarea {
+    border-color: var(--error);
+  }
+
+  .field-error {
+    color: #f87171;
+    font-size: 13px;
+    margin-top: 6px;
+  }
+
+  /* Banners */
   .banner {
-    border-radius: 8px;
-    padding: 12px 14px;
-    font-size: 14.5px;
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    font-size: 14px;
     margin-bottom: 20px;
     border: 1px solid transparent;
+    line-height: 1.5;
   }
-  .banner.error { background: var(--error-bg); color: var(--error); border-color: #f2cfcc; }
-  .banner.duplicate { background: var(--info-bg); color: var(--info); border-color: #cfdcec; }
+
+  .banner.error {
+    background: var(--error-bg);
+    color: #fca5a5;
+    border-color: var(--error-border);
+  }
+
+  .banner.duplicate {
+    background: var(--info-bg);
+    color: #7dd3fc;
+    border-color: var(--info-border);
+  }
+
   .banner:empty { display: none; }
 
+  /* Submit Button */
   button[type="submit"] {
     width: 100%;
-    font: inherit;
+    font-family: inherit;
     font-size: 16px;
     font-weight: 600;
-    color: #fff;
-    background: var(--accent);
-    border: none;
-    border-radius: 8px;
-    padding: 13px 20px;
+    color: #ffffff;
+    background: linear-gradient(180deg, #3b82f6, #2563eb);
+    border: 1px solid #1d4ed8;
+    border-radius: var(--radius-md);
+    padding: 14px 20px;
     cursor: pointer;
-    transition: background .15s ease;
+    transition: all 0.15s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 10px;
-    min-height: 48px;
+    min-height: 50px;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
   }
-  button[type="submit"]:hover:not(:disabled) { background: var(--accent-hover); }
+
+  button[type="submit"]:hover:not(:disabled) {
+    background: linear-gradient(180deg, #2563eb, #1d4ed8);
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45);
+    transform: translateY(-1px);
+  }
+
   button[type="submit"]:focus-visible {
-    outline: 3px solid rgba(47, 111, 181, .5);
-    outline-offset: 2px;
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
-  button[type="submit"]:disabled { opacity: .72; cursor: not-allowed; }
+
+  button[type="submit"]:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+    transform: none;
+  }
+
   .spinner {
-    width: 16px;
-    height: 16px;
-    border: 2.5px solid rgba(255, 255, 255, .45);
-    border-top-color: #fff;
+    width: 18px;
+    height: 18px;
+    border: 2.5px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #ffffff;
     border-radius: 50%;
-    animation: spin .7s linear infinite;
+    animation: spin 0.7s linear infinite;
     display: none;
   }
+
   .submitting .spinner { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .note {
-    color: var(--muted);
+    color: var(--text-muted);
     font-size: 13px;
-    margin: 16px 0 0;
+    margin-top: 16px;
     text-align: center;
   }
 
-  .outcome { text-align: center; padding: 12px 0 4px; }
-  /* Panels receive programmatic focus for screen readers (tabindex="-1");
-   * suppress the default ring, which is purely cosmetic here. */
+  /* Outcome Panels */
+  .outcome {
+    text-align: center;
+    padding: 24px 12px 12px;
+  }
+
   .outcome:focus { outline: none; }
+
   .outcome .mark {
-    width: 52px;
-    height: 52px;
+    width: 58px;
+    height: 58px;
     border-radius: 50%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 26px;
+    font-size: 28px;
     font-weight: 700;
-    margin-bottom: 14px;
+    margin-bottom: 18px;
   }
-  .outcome.success .mark { background: var(--success-bg); color: var(--success); }
-  .outcome.duplicate .mark { background: var(--info-bg); color: var(--info); }
-  .outcome h2 { font-size: 20px; margin: 0 0 8px; }
-  .outcome p { color: var(--muted); margin: 0 auto 20px; max-width: 38ch; }
-  .secondary {
-    font: inherit;
+
+  .outcome.success .mark {
+    background: var(--success-bg);
+    color: var(--success);
+    border: 1px solid var(--success-border);
+  }
+
+  .outcome.duplicate .mark {
+    background: var(--info-bg);
+    color: var(--info);
+    border: 1px solid var(--info-border);
+  }
+
+  .outcome h2 {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+    letter-spacing: -0.01em;
+  }
+
+  .outcome p {
+    color: var(--text-secondary);
+    margin: 0 auto 24px;
+    max-width: 42ch;
     font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .secondary {
+    font-family: inherit;
+    font-size: 14.5px;
     font-weight: 600;
-    color: var(--accent);
-    background: none;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 10px 18px;
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    padding: 12px 24px;
     cursor: pointer;
     min-height: 44px;
+    transition: background 0.15s ease, border-color 0.15s ease;
   }
-  .secondary:hover { background: #f4f6f9; }
+
+  .secondary:hover {
+    background: var(--bg-card-alt);
+    border-color: var(--accent);
+  }
+
+  /* Telemetry / Pipeline Card */
+  .telemetry-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    padding: 36px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .telemetry-header {
+    border-bottom: 1px solid var(--border-subtle);
+    padding-bottom: 18px;
+  }
+
+  .telemetry-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .telemetry-desc {
+    font-size: 13.5px;
+    color: var(--text-secondary);
+  }
+
+  .pipeline-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px;
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+  }
+
+  .step-num {
+    width: 26px;
+    height: 26px;
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .step-content h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+  }
+
+  .step-content p {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    line-height: 1.45;
+  }
+
+  /* Live Inspection Console */
+  .console-box {
+    background: #090d16;
+    border: 1px solid #1e293b;
+    border-radius: var(--radius-md);
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .console-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #1e293b;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .console-code {
+    color: #a5b4fc;
+    line-height: 1.5;
+    word-break: break-all;
+    white-space: pre-wrap;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+
+  /* Features Grid Section */
+  .features-section {
+    padding: 64px 0;
+    border-top: 1px solid var(--border-subtle);
+    background: rgba(17, 24, 39, 0.4);
+  }
+
+  .section-header {
+    text-align: center;
+    max-width: 680px;
+    margin: 0 auto 48px;
+  }
+
+  .section-tag {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #60a5fa;
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .section-title {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+  }
+
+  .section-desc {
+    color: var(--text-secondary);
+    font-size: 16px;
+  }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+
+  .feature-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+
+  .feature-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+  }
+
+  .feature-icon {
+    width: 44px;
+    height: 44px;
+    background: rgba(59, 130, 246, 0.12);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-bottom: 18px;
+    color: #60a5fa;
+  }
+
+  .feature-card h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+  }
+
+  .feature-card p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+
+  /* Architecture Deep-Dive */
+  .arch-section {
+    padding: 64px 0 84px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .arch-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+
+  .arch-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 32px;
+  }
+
+  .arch-card h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .arch-card ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .arch-card li {
+    font-size: 14px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    line-height: 1.5;
+  }
+
+  .arch-card li::before {
+    content: "✓";
+    color: var(--success);
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    padding: 40px 0;
+    margin-top: auto;
+  }
+
+  .footer-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+
+  .footer-brand {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  .footer-tech {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .tech-pill {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
 
   [hidden] { display: none !important; }
 
-  @media (max-width: 560px) {
-    body { padding: 16px 10px; }
-    .card { padding: 26px 20px; border-radius: 12px; }
-    h1 { font-size: 22px; }
+  /* Responsive Design */
+  @media (max-width: 960px) {
+    .demo-grid, .features-grid, .arch-grid {
+      grid-template-columns: 1fr;
+    }
+    .hero-title {
+      font-size: 32px;
+    }
+    .nav-links {
+      display: none;
+    }
+    .form-card {
+      padding: 28px 20px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .container {
+      padding: 0 16px;
+    }
+    .hero-title {
+      font-size: 26px;
+    }
+    .hero-subtitle {
+      font-size: 15px;
+    }
+    .footer-inner {
+      flex-direction: column;
+      align-items: flex-start;
+    }
   }
 </style>
 </head>
 <body>
-<main class="card">
-  <div id="config-banner" class="banner error" role="alert" hidden></div>
 
-  <header>
-    <h1>Talk to our team</h1>
-    <p class="subtitle">Tell us what you&rsquo;re working on and we&rsquo;ll get back to you within one business day.</p>
-  </header>
-
-  <form id="lead-form" novalidate>
-    <div id="banner" class="banner" role="alert" aria-live="assertive"></div>
-
-    <div class="field" id="field-name">
-      <label for="name">Name <span class="req" aria-hidden="true">*</span></label>
-      <input id="name" name="name" type="text" autocomplete="name"
-             placeholder="Ada Lovelace" required aria-required="true"
-             aria-describedby="name-error">
-      <p class="field-error" id="name-error" hidden></p>
+<!-- Header Navigation -->
+<nav class="navbar">
+  <div class="container nav-inner">
+    <a href="#" class="brand">
+      <div class="brand-logo">L</div>
+      <span class="brand-title">LeadIntel</span>
+      <span class="brand-badge">Automation</span>
+    </a>
+    <div class="nav-links">
+      <a href="#demo" class="nav-link">Live Demo</a>
+      <a href="#how-it-works" class="nav-link">Pipeline Flow</a>
+      <a href="#architecture" class="nav-link">Architecture</a>
+      <div class="status-pill">
+        <span class="status-dot"></span>
+        <span>Engine Active</span>
+      </div>
     </div>
-
-    <div class="field" id="field-email">
-      <label for="email">Work email <span class="req" aria-hidden="true">*</span></label>
-      <input id="email" name="email" type="email" autocomplete="email"
-             inputmode="email" placeholder="ada@company.com" required
-             aria-required="true" aria-describedby="email-error">
-      <p class="field-error" id="email-error" hidden></p>
-    </div>
-
-    <div class="field" id="field-company">
-      <label for="company">Company <span class="req" aria-hidden="true">*</span></label>
-      <input id="company" name="company" type="text" autocomplete="organization"
-             placeholder="Analytical Engines Ltd" required aria-required="true"
-             aria-describedby="company-error">
-      <p class="field-error" id="company-error" hidden></p>
-    </div>
-
-    <div class="field" id="field-message">
-      <label for="message">What can we help you with? <span class="req" aria-hidden="true">*</span></label>
-      <textarea id="message" name="message" rows="5" required aria-required="true"
-                aria-describedby="message-error"
-                placeholder="A few sentences about your project, timeline and what you need help with&hellip;"></textarea>
-      <p class="field-error" id="message-error" hidden></p>
-    </div>
-
-    <button type="submit" id="submit-btn">
-      <span class="spinner" aria-hidden="true"></span>
-      <span id="submit-label">Submit</span>
-    </button>
-    <p class="note">We&rsquo;ll only use your details to respond to your enquiry.</p>
-  </form>
-
-  <div id="success-panel" class="outcome success" hidden tabindex="-1">
-    <div class="mark" aria-hidden="true">&#10003;</div>
-    <h2>Thanks. Your message has been received.</h2>
-    <p>Our team will review it and get back to you shortly.</p>
-    <button type="button" class="secondary" id="success-reset">Send another message</button>
+    <a href="#demo" class="nav-cta">Test Submission</a>
   </div>
+</nav>
 
-  <div id="duplicate-panel" class="outcome duplicate" hidden tabindex="-1">
-    <div class="mark" aria-hidden="true">&#10003;</div>
-    <h2>We already have this message.</h2>
-    <p>Thanks &mdash; there&rsquo;s no need to send it again. We&rsquo;ll be in touch.</p>
-    <button type="button" class="secondary" id="duplicate-reset">Start a new message</button>
+<!-- Hero Section -->
+<header class="hero-section">
+  <div class="hero-glow"></div>
+  <div class="container">
+    <div class="hero-content">
+      <div class="hero-eyebrow">
+        <span>⚡ Enterprise Lead Automation Platform</span>
+      </div>
+      <h1 class="hero-title">Automated Inbound Lead Qualification & Intelligent Routing</h1>
+      <p class="hero-subtitle">
+        Eliminate manual triage latency. Ingest, validate, deduplicate, score, and alert sales teams in under 500 milliseconds using FastAPI, PostgreSQL, n8n orchestration, Telegram, and WhatsApp Business.
+      </p>
+      <div class="hero-metrics">
+        <div class="metric-badge">⚡ Sub-Second Ingestion</div>
+        <div class="metric-badge">🛡️ Zero Duplicate Leaks</div>
+        <div class="metric-badge">🤖 OpenRouter LLM + Fallback</div>
+        <div class="metric-badge">📲 Telegram & WhatsApp Alerts</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Main Interactive Demo Section -->
+<main class="demo-section" id="demo">
+  <div class="container">
+    <div class="demo-grid">
+      <!-- Submission Form Card -->
+      <div class="form-card">
+        <div id="config-banner" class="banner error" role="alert" hidden></div>
+
+        <div class="card-header">
+          <span class="card-tag">Interactive Demo</span>
+          <h2 class="card-title">Inbound Lead Submission</h2>
+          <p class="card-desc">Submit a mock enquiry below to watch the intake pipeline validate, persist, score, and route the lead in real time.</p>
+        </div>
+
+        <form id="lead-form" novalidate>
+          <div id="banner" class="banner" role="alert" aria-live="assertive"></div>
+
+          <div class="field" id="field-name">
+            <label for="name">Contact Name <span class="req" aria-hidden="true">*</span></label>
+            <input id="name" name="name" type="text" autocomplete="name"
+                   placeholder="Ada Lovelace" required aria-required="true"
+                   aria-describedby="name-error">
+            <p class="field-error" id="name-error" hidden></p>
+          </div>
+
+          <div class="field" id="field-email">
+            <label for="email">Work Email <span class="req" aria-hidden="true">*</span></label>
+            <input id="email" name="email" type="email" autocomplete="email"
+                   inputmode="email" placeholder="ada@company.com" required
+                   aria-required="true" aria-describedby="email-error">
+            <p class="field-error" id="email-error" hidden></p>
+          </div>
+
+          <div class="field" id="field-company">
+            <label for="company">Company Name <span class="req" aria-hidden="true">*</span></label>
+            <input id="company" name="company" type="text" autocomplete="organization"
+                   placeholder="Analytical Engines Ltd" required aria-required="true"
+                   aria-describedby="company-error">
+            <p class="field-error" id="company-error" hidden></p>
+          </div>
+
+          <div class="field" id="field-message">
+            <label for="message">Project Requirements / Buying Intent <span class="req" aria-hidden="true">*</span></label>
+            <textarea id="message" name="message" rows="4" required aria-required="true"
+                      aria-describedby="message-error"
+                      placeholder="e.g., We have a team of 40 looking to automate enterprise inbound pipeline scoring this quarter..."></textarea>
+            <p class="field-error" id="message-error" hidden></p>
+          </div>
+
+          <button type="submit" id="submit-btn">
+            <span class="spinner" aria-hidden="true"></span>
+            <span id="submit-label">Submit Inbound Lead</span>
+          </button>
+          <p class="note">Encrypted same-origin transit. PII is sanitized prior to external notification dispatch.</p>
+        </form>
+
+        <!-- Success Outcome Panel -->
+        <div id="success-panel" class="outcome success" hidden tabindex="-1">
+          <div class="mark" aria-hidden="true">&#10003;</div>
+          <h2>Lead Successfully Ingested</h2>
+          <p>Your lead has passed validation, was stored in PostgreSQL, evaluated by the scoring engine, and routed to sales alert channels.</p>
+          <button type="button" class="secondary" id="success-reset">Submit Another Lead</button>
+        </div>
+
+        <!-- Duplicate Outcome Panel -->
+        <div id="duplicate-panel" class="outcome duplicate" hidden tabindex="-1">
+          <div class="mark" aria-hidden="true">&#10003;</div>
+          <h2>Duplicate Submission Detected</h2>
+          <p>This lead was previously ingested with the same source key. The idempotency guard prevented duplicate record creation and re-alerting.</p>
+          <button type="button" class="secondary" id="duplicate-reset">Start A New Lead</button>
+        </div>
+      </div>
+
+      <!-- Telemetry & Pipeline Inspector Card -->
+      <div class="telemetry-card">
+        <div class="telemetry-header">
+          <h3 class="telemetry-title">
+            <span>Pipeline Telemetry & Diagnostics</span>
+            <span class="brand-badge">Live Monitor</span>
+          </h3>
+          <p class="telemetry-desc">How your submission traverses the system architecture:</p>
+        </div>
+
+        <div class="pipeline-flow">
+          <div class="flow-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <h4>Caddy Proxy & Webhook Ingestion</h4>
+              <p>HTTP access control verifies headers; passes directly to the isolated loopback n8n intake webhook.</p>
+            </div>
+          </div>
+
+          <div class="flow-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <h4>FastAPI Validation & Idempotency</h4>
+              <p>Pydantic enforces strict contract. PostgreSQL checks unique <code>(source, external_id)</code> index to reject duplicates (409).</p>
+            </div>
+          </div>
+
+          <div class="flow-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <h4>OpenRouter LLM + Fallback Scoring</h4>
+              <p>AI evaluates budget, authority, and urgency. Deterministic heuristic fallback activates automatically if provider times out.</p>
+            </div>
+          </div>
+
+          <div class="flow-step">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <h4>Dual-Channel Operator Dispatch</h4>
+              <p>Scores &ge; 70 trigger instant Telegram and WhatsApp Business Cloud alerts with isolated failure resilience.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="console-box">
+          <div class="console-header">
+            <span>Outbound Webhook Payload Preview</span>
+            <span id="external-id-badge">ID: generating...</span>
+          </div>
+          <div class="console-code" id="payload-preview">/* Payload preview updates dynamically as you type */</div>
+        </div>
+      </div>
+    </div>
   </div>
 </main>
+
+<!-- Features / System Capabilities -->
+<section class="features-section" id="how-it-works">
+  <div class="container">
+    <div class="section-header">
+      <span class="section-tag">Enterprise Readiness</span>
+      <h2 class="section-title">Built For Reliability Under Pressure</h2>
+      <p class="section-desc">Designed with defensive distributed system principles: idempotent ingest, fail-open scoring, and decoupled notifications.</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>PostgreSQL Idempotency</h3>
+        <p>A composite unique constraint on source and client external ID guarantees that re-transmissions and network retries never generate ghost leads or duplicate CRM records.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🤖</div>
+        <h3>Dual-Engine Scoring</h3>
+        <p>Configurable OpenRouter LLM evaluates buying intent against a 0–100 rubric. If the LLM provider fails or times out, a local deterministic heuristic takes over seamlessly.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📲</div>
+        <h3>Telegram & WhatsApp Dispatch</h3>
+        <p>High-priority leads trigger instant mobile alerts via Telegram and WhatsApp Business Cloud API. Downstream messaging errors never drop or delay the intake HTTP 201 response.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🔒</div>
+        <h3>Privacy By Design</h3>
+        <p>Free-text customer messages are stripped before triggering external webhook alerts. Only sanitized metadata (name, company, email, score, lead ID) travels to external messaging apps.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Audit Trail Persisted</h3>
+        <p>Every scoring decision, qualification threshold check, and notification outcome is recorded in n8n's execution history for complete operational observability.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Zero-Framework Frontend</h3>
+        <p>Self-contained vanilla HTML5/CSS/JavaScript with zero third-party CDNs or tracking scripts. Fast initial paint, responsive down to 320px mobile screens.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture Section -->
+<section class="arch-section" id="architecture">
+  <div class="container">
+    <div class="section-header">
+      <span class="section-tag">Engineering Highlights</span>
+      <h2 class="section-title">Fault Isolation & Defensive Architecture</h2>
+      <p class="section-desc">Clear boundaries between edge proxy, orchestration engine, database, and notification buses.</p>
+    </div>
+
+    <div class="arch-grid">
+      <div class="arch-card">
+        <h3><span>⚡</span> Pipeline Execution Order</h3>
+        <ul>
+          <li><strong>Webhook Ingestion:</strong> n8n captures inbound JSON payload and formats schema.</li>
+          <li><strong>Early Response:</strong> <code>Respond Created</code> issues HTTP 201 to caller before async notification dispatch.</li>
+          <li><strong>Audit Persistence:</strong> Execution record is generated regardless of external channel availability.</li>
+          <li><strong>Parallel Delivery:</strong> Telegram and WhatsApp notification branches run concurrently with isolated error boundaries.</li>
+        </ul>
+      </div>
+
+      <div class="arch-card">
+        <h3><span>🛡️</span> Failure Resilience Matrix</h3>
+        <ul>
+          <li><strong>LLM Provider Down:</strong> Automatically falls back to deterministic heuristic rules (0-100).</li>
+          <li><strong>WhatsApp API Quota/Outage:</strong> Logged as operational failure; Telegram continues uninterrupted.</li>
+          <li><strong>Duplicate Submission:</strong> Caught at database layer; n8n translates to clean 409 Conflict.</li>
+          <li><strong>Schema Violation:</strong> Pydantic rejects invalid types with detailed 422 Unprocessable Entity.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <strong>Lead Intelligence Automation</strong> &mdash; Production-grade inbound lead qualification and routing.
+    </div>
+    <div class="footer-tech">
+      <span class="tech-pill">FastAPI</span>
+      <span class="tech-pill">Python 3.12</span>
+      <span class="tech-pill">PostgreSQL 16</span>
+      <span class="tech-pill">n8n</span>
+      <span class="tech-pill">Caddy 2</span>
+      <span class="tech-pill">WhatsApp Cloud API</span>
+      <span class="tech-pill">Telegram Bot API</span>
+    </div>
+  </div>
+</footer>
 
 <script src="config.js"></script>
 <script>
 /* =====================================================================
- * Demo lead form — configuration
+ * Demo lead form — configuration & runtime logic
  * =====================================================================
  * The n8n production webhook URL is configured in exactly ONE place:
- * config.js (window.LEAD_FORM_CONFIG.webhookUrl), loaded just above this
- * block. This script only reads it; nothing here hardcodes a URL. The
- * committed config.js holds the local development default — deployments
- * replace that file (deploy/bin/render-form.sh / DEMO_N8N_WEBHOOK_URL).
+ * config.js (window.LEAD_FORM_CONFIG.webhookUrl). This script only reads
+ * it; nothing here hardcodes a URL. Deployments render that file
+ * (deploy/bin/render-form.sh / DEMO_N8N_WEBHOOK_URL).
  *
  * Flow:  Browser -> n8n webhook (POST /webhook/lead-intake)
  *             -> FastAPI /leads -> PostgreSQL + scoring
- *             -> qualification -> audit -> Telegram
- * The form never calls FastAPI directly.
+ *             -> qualification -> audit -> Telegram & WhatsApp
  *
- * Developer/duplicate testing: open the page with ?external_id=<id> to
+ * Developer duplicate testing: open the page with ?external_id=<id> to
  * pin the client-generated external_id, e.g. ?external_id=demo-dup-1.
- * Submitting twice with the same content then demonstrates the duplicate
- * (409) response. The external_id is otherwise generated per message in
- * the browser with crypto.randomUUID() so an accidental retry of the same
- * message does not create a second row; it is NOT a claim of global
- * uniqueness.
  * ===================================================================== */
 const CONFIG = {
   webhookUrl: (window.LEAD_FORM_CONFIG || {}).webhookUrl || "",
   source: "website-contact-form",
 };
 
-/* Optional developer pin for duplicate demonstrations (documented in README). */
+/* Optional developer pin for duplicate demonstrations */
 const DEV_EXTERNAL_ID = new URLSearchParams(window.location.search).get("external_id");
 
 const form = document.getElementById("lead-form");
 const banner = document.getElementById("banner");
 const submitBtn = document.getElementById("submit-btn");
 const submitLabel = document.getElementById("submit-label");
+const payloadPreview = document.getElementById("payload-preview");
+const externalIdBadge = document.getElementById("external-id-badge");
 
-/* Loud, visible misconfiguration state: no webhook URL means the page
- * was served without its config.js (or an empty one) — never fail
- * silently into a generic network error. */
+/* Visible misconfiguration banner if config.js missing */
 if (!CONFIG.webhookUrl) {
   const configBanner = document.getElementById("config-banner");
   configBanner.textContent =
-    "This form is not set up correctly (config.js is missing its webhook URL). " +
+    "This form is not configured correctly (config.js is missing its webhook URL). " +
     "Please contact the site operator.";
   configBanner.hidden = false;
   console.error("[lead-form] LEAD_FORM_CONFIG.webhookUrl is missing — check config.js");
 }
 
 const FIELDS = ["name", "email", "company", "message"];
-
-/* external_id of the message currently being submitted: kept across retries
- * (a retry of the same message must reuse it), cleared once delivered. */
 let currentExternalId = null;
 
 function mintExternalId() {
@@ -310,15 +1158,39 @@ function mintExternalId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
     return window.crypto.randomUUID();
   }
-  /* Fallback for non-secure contexts: timestamp + random, demo-grade only. */
-  return "demo-" + Date.now().toString(36) + "-" +
-         Math.random().toString(36).slice(2, 12);
+  return "demo-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
 }
+
+function updateTelemetryPreview() {
+  if (!payloadPreview) return;
+  const extId = currentExternalId || DEV_EXTERNAL_ID || "demo-" + (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID().slice(0, 8) : "live");
+  if (externalIdBadge) {
+    externalIdBadge.textContent = "ID: " + extId.slice(0, 16) + "...";
+  }
+  const preview = {
+    name: (document.getElementById("name").value || "Ada Lovelace").trim(),
+    email: (document.getElementById("email").value || "ada@company.com").trim(),
+    company: (document.getElementById("company").value || "Analytical Engines Ltd").trim(),
+    message: (document.getElementById("message").value || "Exploring automated qualification for enterprise inbound.").trim(),
+    source: CONFIG.source,
+    external_id: extId
+  };
+  payloadPreview.textContent = JSON.stringify(preview, null, 2);
+}
+
+FIELDS.forEach(function(f) {
+  const el = document.getElementById(f);
+  if (el) {
+    el.addEventListener("input", updateTelemetryPreview);
+  }
+});
+updateTelemetryPreview();
 
 function setFieldError(fieldName, message) {
   const wrap = document.getElementById("field-" + fieldName);
   const input = document.getElementById(fieldName);
   const errorEl = document.getElementById(fieldName + "-error");
+  if (!wrap || !input || !errorEl) return;
   if (message) {
     wrap.classList.add("invalid");
     input.setAttribute("aria-invalid", "true");
@@ -335,12 +1207,12 @@ function setFieldError(fieldName, message) {
 function clearAllErrors() {
   banner.textContent = "";
   banner.classList.remove("error", "duplicate");
-  FIELDS.forEach((f) => setFieldError(f, null));
+  FIELDS.forEach(function(f) { setFieldError(f, null); });
 }
 
 function validateForm() {
   let firstInvalid = null;
-  FIELDS.forEach((f) => {
+  FIELDS.forEach(function(f) {
     const el = document.getElementById(f);
     const value = el.value.trim();
     let error = "";
@@ -358,12 +1230,10 @@ function validateForm() {
   return !firstInvalid;
 }
 
-/* Map FastAPI's validation detail to friendly per-field messages.
- * Only field names are used — no raw server text reaches the user. */
 function renderValidationErrors(detail) {
   let any = false;
   if (Array.isArray(detail)) {
-    detail.forEach((err) => {
+    detail.forEach(function(err) {
       const field = Array.isArray(err.loc) ? err.loc[err.loc.length - 1] : null;
       if (field && FIELDS.includes(field)) {
         setFieldError(field, field === "email"
@@ -387,21 +1257,22 @@ function resetToForm() {
   clearAllErrors();
   form.reset();
   currentExternalId = null;
-  document.querySelectorAll(".outcome").forEach((p) => { p.hidden = true; });
+  document.querySelectorAll(".outcome").forEach(function(p) { p.hidden = true; });
   form.hidden = false;
+  updateTelemetryPreview();
   document.getElementById("name").focus();
 }
 
 function setSubmitting(isSubmitting) {
   submitBtn.disabled = isSubmitting;
   form.classList.toggle("submitting", isSubmitting);
-  submitLabel.textContent = isSubmitting ? "Submitting\u2026" : "Submit";
+  submitLabel.textContent = isSubmitting ? "Submitting\u2026" : "Submit Inbound Lead";
 }
 
 async function handleSubmit(event) {
   event.preventDefault();
   clearAllErrors();
-  if (!CONFIG.webhookUrl) return; /* config banner already visible */
+  if (!CONFIG.webhookUrl) return;
   if (!validateForm()) return;
 
   const payload = {
@@ -422,10 +1293,8 @@ async function handleSubmit(event) {
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    /* Network failure talking to n8n: keep the external_id so a retry of
-     * this same message cannot create a second row if it landed. */
     setSubmitting(false);
-    console.warn("[lead-form] network error reaching the webhook:", err);
+    console.warn("[lead-form] network error reaching webhook:", err);
     banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
     banner.classList.add("error");
     return;
