@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    db.configure_pool(get_settings().database_url)
+    settings = get_settings()
+    if settings.is_production and not settings.api_auth_token:
+        raise RuntimeError("CRITICAL: API_AUTH_TOKEN must be configured in production environment")
+    db.configure_pool(settings.database_url)
     try:
         db.init_schema()
         yield

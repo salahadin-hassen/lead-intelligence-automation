@@ -37,6 +37,8 @@
     },
     {
       "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "method": "POST",
         "url": "={{ $json.apiLeadsUrl }}",
         "sendBody": true,
@@ -69,6 +71,12 @@
         480,
         0
       ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fastapi-bearer-auth",
+          "name": "FastAPI Bearer Auth"
+        }
+      },
       "onError": "continueRegularOutput",
       "retryOnFail": false
     },

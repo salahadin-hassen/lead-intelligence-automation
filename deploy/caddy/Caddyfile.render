@@ -1,0 +1,47 @@
+# =====================================================================
+# Caddy — production edge proxy for Render Web Service (public website).
+# =====================================================================
+# Render terminates TLS at its edge proxy and forwards plain HTTP to
+# this container on :$PORT (default 10000).
+#
+#   https://<caddy-subdomain>.onrender.com/          -> LeadIntel V2 form
+#   https://<caddy-subdomain>.onrender.com/webhook/* -> n8n webhook target
+#
+# Environment variables:
+#   PORT                provided automatically by Render (default 10000)
+#   N8N_WEBHOOK_TARGET  HTTPS URL of deployed n8n, e.g. https://lead-n8n.onrender.com
+#   LEAD_WWW_ROOT       document root (default /var/www)
+# =====================================================================
+{
+	auto_https off
+}
+
+:{$PORT:10000} {
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+
+	request_body {
+		max_size 256KB
+	}
+
+	# Same-origin webhook proxy to n8n
+	handle /webhook/* {
+		reverse_proxy {$N8N_WEBHOOK_TARGET:127.0.0.1:5678} {
+			header_up Host {upstream_hostport}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	# Serve static LeadIntel V2 frontend
+	handle {
+		root * {$LEAD_WWW_ROOT:/var/www}
+		file_server
+		try_files {path} /index.html
+	}
+}

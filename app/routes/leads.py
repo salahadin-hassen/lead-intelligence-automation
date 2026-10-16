@@ -6,7 +6,10 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from app import db, scoring
+from app.config import Settings, get_settings
 from app.errors import DuplicateLeadError
 from app.models import (
     LeadCreate,
@@ -27,7 +30,40 @@ def get_scorer() -> Scorer:
     return scoring.score
 
 
-router = APIRouter()
+_bearer_security = HTTPBearer(auto_error=False)
+
+
+def verify_api_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_security),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    # Fail-closed in production: unconfigured token or missing credentials always rejected
+    if settings.is_production:
+        if not settings.api_auth_token:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication misconfigured in production",
+            )
+        if credentials is None or credentials.credentials != settings.api_auth_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return
+
+    # In development / testing:
+    # If a token is explicitly configured, enforce it; otherwise permit for testing.
+    if settings.api_auth_token:
+        if credentials is None or credentials.credentials != settings.api_auth_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+
+router = APIRouter(dependencies=[Depends(verify_api_token)])
 
 
 def _to_response(row: dict) -> LeadResponse:

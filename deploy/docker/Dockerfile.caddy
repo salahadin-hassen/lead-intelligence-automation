@@ -1,0 +1,21 @@
+FROM caddy:2.8-alpine
+
+WORKDIR /var/www
+
+# Copy the LeadIntel V2 frontend
+COPY demo/lead-form.html /var/www/index.html
+COPY demo/lead-form.html /var/www/lead-form.html
+
+# Copy Caddy configuration for Render
+COPY deploy/caddy/Caddyfile.render /etc/caddy/Caddyfile
+
+# Generate same-origin config.js by default
+RUN echo 'window.LEAD_FORM_CONFIG = { webhookUrl: "/webhook/lead-intake" };' > /var/www/config.js
+
+ENV PORT=10000
+ENV LEAD_WWW_ROOT=/var/www
+
+EXPOSE 10000
+
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
+

@@ -1,0 +1,17 @@
+FROM n8nio/n8n:2.41.7
+
+USER root
+
+# Create workflows folder and install entrypoint
+RUN mkdir -p /workflows && chown -R node:node /workflows
+COPY n8n/lead-intake.json /workflows/lead-intake.json
+COPY deploy/docker/n8n-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh && chown node:node /docker-entrypoint.sh /workflows/lead-intake.json
+
+USER node
+
+ENV PORT=5678
+EXPOSE 5678
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+

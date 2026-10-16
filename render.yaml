@@ -1,0 +1,83 @@
+# =====================================================================
+# Render Infrastructure Blueprint — LeadIntel Portfolio Deployment
+# =====================================================================
+# Deploys the complete three-tier production stack on Render Free Tier:
+#   1. leadintel-caddy: Public static site + reverse proxy (/webhook/* -> n8n)
+#   2. leadintel-api:   FastAPI scoring, validation & PostgreSQL persistence
+#   3. leadintel-n8n:   n8n workflow engine (Telegram/WhatsApp orchestration)
+#
+# Free Tier Constraints & Networking:
+#   - Database: Use external Neon PostgreSQL (never expires, free forever)
+#   - Inbound Networking: Render Free Web Services CANNOT receive private network
+#     traffic. Therefore, inter-service traffic flows over public HTTPS:
+#       * Caddy -> n8n:     N8N_WEBHOOK_TARGET=https://<leadintel-n8n>.onrender.com
+#       * n8n   -> FastAPI: LEAD_API_BASE_URL=https://<leadintel-api>.onrender.com
+#   - Compute: Free Web Services sleep after 15 min of inactivity (~50s cold start)
+# =====================================================================
+
+services:
+  # -------------------------------------------------------------------
+  # 1. Edge Proxy & Portfolio Website (Caddy)
+  # -------------------------------------------------------------------
+  - type: web
+    name: leadintel-caddy
+    runtime: docker
+    dockerfilePath: deploy/docker/Dockerfile.caddy
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: N8N_WEBHOOK_TARGET
+        sync: false # Set to https://<leadintel-n8n>.onrender.com
+
+  # -------------------------------------------------------------------
+  # 2. Application API (FastAPI + psycopg Connection Pool)
+  # -------------------------------------------------------------------
+  - type: web
+    name: leadintel-api
+    runtime: docker
+    dockerfilePath: deploy/docker/Dockerfile.api
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false # Set to Neon PostgreSQL connection string for lead_app
+      - key: API_AUTH_TOKEN
+        generateValue: true
+
+  # -------------------------------------------------------------------
+  # 3. Workflow Engine (n8n v2.41.7)
+  # -------------------------------------------------------------------
+  - type: web
+    name: leadintel-n8n
+    runtime: docker
+    dockerfilePath: deploy/docker/Dockerfile.n8n
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 5678
+      - key: N8N_ENCRYPTION_KEY
+        generateValue: true
+      - key: N8N_DATABASE_URL
+        sync: false # Set to Neon PostgreSQL connection string for n8n
+      - key: N8N_RUNNERS_BROKER_PORT
+        value: "5679"
+      - key: N8N_DIAGNOSTICS_ENABLED
+        value: "false"
+      - key: LEAD_API_BASE_URL
+        sync: false # Set to https://<leadintel-api>.onrender.com
+      - key: LEAD_QUALIFIED_THRESHOLD
+        value: "70"
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_RECIPIENT_PHONE_NUMBER
+        sync: false

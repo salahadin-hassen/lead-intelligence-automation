@@ -3,1107 +3,2068 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lead Intelligence Automation — Inbound Lead Qualification & Routing</title>
-<meta name="description" content="Automated inbound lead qualification and routing system built with FastAPI, PostgreSQL, n8n, OpenRouter LLM, Telegram, and WhatsApp Business Cloud API.">
+<title>LeadIntel — Inbound Lead Intelligence &amp; Autonomous Qualification</title>
+<meta name="description" content="Validate enquiries, identify duplicates, prioritize leads, and route the next action through one traceable, fault-tolerant workflow.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg-page: #0b101b;
-    --bg-surface: #111827;
-    --bg-card: #162032;
-    --bg-card-alt: #1a263c;
-    --border-subtle: #25334c;
-    --border-strong: #374b6e;
-    --text-primary: #f3f6fc;
-    --text-secondary: #9db0cc;
-    --text-muted: #627694;
-    --accent: #3b82f6;
-    --accent-hover: #2563eb;
-    --accent-glow: rgba(59, 130, 246, 0.18);
-    --success: #10b981;
-    --success-bg: rgba(16, 185, 129, 0.12);
-    --success-border: rgba(16, 185, 129, 0.3);
-    --warning: #f59e0b;
-    --warning-bg: rgba(245, 158, 11, 0.12);
-    --warning-border: rgba(245, 158, 11, 0.3);
-    --error: #ef4444;
-    --error-bg: rgba(239, 68, 68, 0.12);
-    --error-border: rgba(239, 68, 68, 0.3);
-    --info: #38bdf8;
-    --info-bg: rgba(56, 189, 248, 0.12);
-    --info-border: rgba(56, 189, 248, 0.3);
-    --focus-ring: 0 0 0 3px rgba(59, 130, 246, 0.35);
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 16px;
-    --radius-xl: 24px;
-    --shadow-card: 0 10px 30px -5px rgba(0, 0, 0, 0.4), 0 0 1px 1px rgba(255, 255, 255, 0.05);
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    --bg-dark: #101C24;
+    --bg-dark-card: #192A33;
+    --bg-dark-card-hover: #1f333e;
+    --bg-cream: #F3F0E8;
+    --bg-sage: #EAEDE7;
+    --bg-white: #FFFFFF;
+
+    --text-on-dark: #F3F0E8;
+    --text-on-dark-muted: #BAC5C5;
+    --text-primary: #101C24;
+    --text-muted: #596675;
+    --text-dim: #7B8B9A;
+
+    --border-dark: #253844;
+    --border-dark-strong: #2D3E47;
+    --border-light: #E0E3DC;
+    --border-light-subtle: #ECEFE8;
+
+    --blue-primary: #315FEA;
+    --blue-primary-hover: #264ec4;
+    --blue-mark: #9DB2FF;
+    --accent-lime: #D4F36B;
+    --accent-lime-dark: #526A14;
+    --accent-orange: #C25B1D;
+    --accent-red: #D9383A;
+    --accent-green: #1B7A43;
+
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-2xl: 20px;
+
+    --header-h: 72px;
+    --content-max-w: 1280px;
   }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 
   html {
     scroll-behavior: smooth;
     font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 
   body {
-    background-color: var(--bg-page);
+    background-color: var(--bg-cream);
     color: var(--text-primary);
     font-family: var(--font-sans);
-    line-height: 1.6;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
+    overflow-x: hidden;
+    position: relative;
   }
 
-  /* Utility container */
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    background: none;
+  }
+
+  /* Reading Progress Bar */
+  .reading-progress-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background: var(--blue-primary);
+    transform-origin: 0 50%;
+    transform: scaleX(0);
+    z-index: 1001;
+    transition: transform 0.08s linear;
+  }
+
+  /* Consistent Fluid Container */
   .container {
     width: 100%;
-    max-width: 1200px;
+    max-width: var(--content-max-w);
     margin: 0 auto;
-    padding: 0 24px;
+    padding-left: clamp(20px, 4vw, 64px);
+    padding-right: clamp(20px, 4vw, 64px);
   }
 
-  /* Navigation Bar */
-  .navbar {
-    background: rgba(17, 24, 39, 0.85);
+  /* Section Chapters & Punctuation */
+  .section-chapter-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 20px;
+  }
+
+  .section-chapter-tag.dark {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-on-dark-muted);
+    border: 1px solid var(--border-dark-strong);
+  }
+
+  .section-chapter-tag.light {
+    background: rgba(16, 28, 36, 0.05);
+    color: var(--text-muted);
+    border: 1px solid var(--border-light);
+  }
+
+  .section-chapter-tag .tag-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--blue-primary);
+  }
+
+  .section-divider-rule {
+    width: 100%;
+    height: 1px;
+    background: var(--border-light);
+    margin-bottom: 40px;
+  }
+
+  .section-divider-rule.dark {
+    background: var(--border-dark);
+  }
+
+  /* Sticky Header */
+  .site-header {
+    background: rgba(16, 28, 36, 0.95);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--border-subtle);
     position: sticky;
     top: 0;
-    z-index: 100;
+    z-index: 1000;
+    border-bottom: 1px solid var(--border-dark);
+    transition: background 0.2s ease;
   }
 
   .nav-inner {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 68px;
+    height: var(--header-h);
   }
 
-  .brand {
+  .brand-identity {
     display: flex;
     align-items: center;
     gap: 12px;
+    color: var(--text-on-dark);
     text-decoration: none;
-    color: var(--text-primary);
+    z-index: 1002;
   }
 
-  .brand-logo {
-    width: 36px;
-    height: 36px;
-    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-    border-radius: var(--radius-md);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-weight: 800;
-    font-size: 18px;
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
-  }
-
-  .brand-title {
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
-
-  .brand-badge {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    background: rgba(59, 130, 246, 0.15);
-    color: #60a5fa;
-    padding: 2px 8px;
-    border-radius: 999px;
-    border: 1px solid rgba(59, 130, 246, 0.3);
-  }
-
-  .nav-links {
-    display: flex;
-    align-items: center;
-    gap: 24px;
-  }
-
-  .nav-link {
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-size: 14px;
-    font-weight: 500;
-    transition: color 0.15s ease;
-  }
-
-  .nav-link:hover { color: var(--text-primary); }
-
-  .status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    background: var(--bg-surface);
-    padding: 6px 12px;
-    border-radius: 999px;
-    border: 1px solid var(--border-subtle);
-  }
-
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    background: var(--success);
-    border-radius: 50%;
-    box-shadow: 0 0 8px var(--success);
-    animation: pulse 2s infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(0.9); }
-  }
-
-  .nav-cta {
-    background: var(--accent);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 600;
-    padding: 8px 16px;
-    border-radius: var(--radius-sm);
-    text-decoration: none;
-    transition: background 0.15s ease, transform 0.1s ease;
-  }
-
-  .nav-cta:hover {
-    background: var(--accent-hover);
-    transform: translateY(-1px);
-  }
-
-  /* Hero Section */
-  .hero-section {
-    padding: 72px 0 48px;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .hero-glow {
-    position: absolute;
-    top: -100px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 600px;
-    height: 400px;
-    background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, rgba(11, 16, 27, 0) 70%);
-    pointer-events: none;
-  }
-
-  .hero-content {
-    text-align: center;
-    max-width: 840px;
-    margin: 0 auto;
-    position: relative;
-  }
-
-  .hero-eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #60a5fa;
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.25);
-    padding: 6px 14px;
-    border-radius: 999px;
-    margin-bottom: 20px;
-  }
-
-  .hero-title {
-    font-size: 42px;
-    font-weight: 800;
-    line-height: 1.15;
-    letter-spacing: -0.03em;
-    margin-bottom: 20px;
-    background: linear-gradient(180deg, #ffffff 30%, #a5b4fc 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-
-  .hero-subtitle {
-    font-size: 18px;
-    line-height: 1.6;
-    color: var(--text-secondary);
-    margin-bottom: 32px;
-  }
-
-  .hero-metrics {
-    display: flex;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 16px;
-    margin-bottom: 12px;
-  }
-
-  .metric-badge {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    padding: 8px 16px;
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .metric-badge strong {
-    color: var(--text-primary);
-    font-weight: 600;
-  }
-
-  /* Main Interactive Demo Area */
-  .demo-section {
-    padding: 32px 0 72px;
-  }
-
-  .demo-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 32px;
-    align-items: start;
-  }
-
-  /* Form Card */
-  .form-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-xl);
-    padding: 40px;
-    box-shadow: var(--shadow-card);
-    position: relative;
-  }
-
-  .card-header {
-    margin-bottom: 28px;
-  }
-
-  .card-tag {
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #60a5fa;
-    margin-bottom: 6px;
-    display: block;
-  }
-
-  .card-title {
-    font-size: 24px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
-    margin-bottom: 8px;
-  }
-
-  .card-desc {
-    color: var(--text-secondary);
-    font-size: 14.5px;
-    line-height: 1.5;
-  }
-
-  /* Form Elements */
-  .field {
-    margin-bottom: 20px;
-  }
-
-  label {
-    display: block;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 8px;
-  }
-
-  .req {
-    color: var(--error);
-    margin-left: 2px;
-  }
-
-  input, textarea {
-    width: 100%;
-    font-family: inherit;
-    font-size: 15px;
-    color: var(--text-primary);
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    padding: 12px 14px;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
-  }
-
-  input::placeholder, textarea::placeholder {
-    color: var(--text-muted);
-  }
-
-  input:focus, textarea:focus {
-    outline: none;
-    background: var(--bg-card);
-    border-color: var(--accent);
-    box-shadow: var(--focus-ring);
-  }
-
-  textarea {
-    min-height: 110px;
-    resize: vertical;
-  }
-
-  .invalid input, .invalid textarea {
-    border-color: var(--error);
-  }
-
-  .field-error {
-    color: #f87171;
-    font-size: 13px;
-    margin-top: 6px;
-  }
-
-  /* Banners */
-  .banner {
-    border-radius: var(--radius-md);
-    padding: 14px 16px;
-    font-size: 14px;
-    margin-bottom: 20px;
-    border: 1px solid transparent;
-    line-height: 1.5;
-  }
-
-  .banner.error {
-    background: var(--error-bg);
-    color: #fca5a5;
-    border-color: var(--error-border);
-  }
-
-  .banner.duplicate {
-    background: var(--info-bg);
-    color: #7dd3fc;
-    border-color: var(--info-border);
-  }
-
-  .banner:empty { display: none; }
-
-  /* Submit Button */
-  button[type="submit"] {
-    width: 100%;
-    font-family: inherit;
-    font-size: 16px;
-    font-weight: 600;
-    color: #ffffff;
-    background: linear-gradient(180deg, #3b82f6, #2563eb);
-    border: 1px solid #1d4ed8;
-    border-radius: var(--radius-md);
-    padding: 14px 20px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    min-height: 50px;
-    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3);
-  }
-
-  button[type="submit"]:hover:not(:disabled) {
-    background: linear-gradient(180deg, #2563eb, #1d4ed8);
-    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45);
-    transform: translateY(-1px);
-  }
-
-  button[type="submit"]:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-
-  button[type="submit"]:disabled {
-    opacity: 0.65;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .spinner {
-    width: 18px;
-    height: 18px;
-    border: 2.5px solid rgba(255, 255, 255, 0.35);
-    border-top-color: #ffffff;
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-    display: none;
-  }
-
-  .submitting .spinner { display: inline-block; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  .note {
-    color: var(--text-muted);
-    font-size: 13px;
-    margin-top: 16px;
-    text-align: center;
-  }
-
-  /* Outcome Panels */
-  .outcome {
-    text-align: center;
-    padding: 24px 12px 12px;
-  }
-
-  .outcome:focus { outline: none; }
-
-  .outcome .mark {
-    width: 58px;
-    height: 58px;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 28px;
-    font-weight: 700;
-    margin-bottom: 18px;
-  }
-
-  .outcome.success .mark {
-    background: var(--success-bg);
-    color: var(--success);
-    border: 1px solid var(--success-border);
-  }
-
-  .outcome.duplicate .mark {
-    background: var(--info-bg);
-    color: var(--info);
-    border: 1px solid var(--info-border);
-  }
-
-  .outcome h2 {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 10px;
-    letter-spacing: -0.01em;
-  }
-
-  .outcome p {
-    color: var(--text-secondary);
-    margin: 0 auto 24px;
-    max-width: 42ch;
-    font-size: 15px;
-    line-height: 1.6;
-  }
-
-  .secondary {
-    font-family: inherit;
-    font-size: 14.5px;
-    font-weight: 600;
-    color: var(--text-primary);
-    background: var(--bg-surface);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    padding: 12px 24px;
-    cursor: pointer;
-    min-height: 44px;
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-
-  .secondary:hover {
-    background: var(--bg-card-alt);
-    border-color: var(--accent);
-  }
-
-  /* Telemetry / Pipeline Card */
-  .telemetry-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-xl);
-    padding: 36px;
-    display: flex;
-    flex-direction: column;
-    gap: 28px;
-  }
-
-  .telemetry-header {
-    border-bottom: 1px solid var(--border-subtle);
-    padding-bottom: 18px;
-  }
-
-  .telemetry-title {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .telemetry-desc {
-    font-size: 13.5px;
-    color: var(--text-secondary);
-  }
-
-  .pipeline-flow {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .flow-step {
-    display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 14px;
-    border-radius: var(--radius-md);
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-  }
-
-  .step-num {
-    width: 26px;
-    height: 26px;
-    background: rgba(59, 130, 246, 0.2);
-    color: #60a5fa;
-    border-radius: 50%;
-    font-size: 12px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .brand-logo-svg {
+    width: 28px;
+    height: 28px;
     flex-shrink: 0;
   }
 
-  .step-content h4 {
+  .brand-wordmark {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-on-dark);
+  }
+
+  .desktop-nav {
+    display: none;
+    align-items: center;
+    gap: 28px;
+  }
+
+  @media (min-width: 860px) {
+    .desktop-nav {
+      display: flex;
+    }
+  }
+
+  .nav-link {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-on-dark-muted);
+    transition: color 0.15s ease;
+    position: relative;
+    padding: 6px 0;
+  }
+
+  .nav-link:hover {
+    color: var(--text-on-dark);
+  }
+
+  .nav-link.active {
+    color: var(--text-on-dark);
+    font-weight: 600;
+  }
+
+  .nav-link.active::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--blue-primary);
+    border-radius: 2px;
+  }
+
+  .nav-cta-wrap {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .btn-primary {
+    background: var(--blue-primary);
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: var(--radius-md);
+    transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-decoration: none;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .btn-primary:hover {
+    background: var(--blue-primary-hover);
+    box-shadow: 0 4px 12px rgba(49, 95, 234, 0.25);
+  }
+
+  .btn-primary:active {
+    transform: translateY(1px);
+  }
+
+  .btn-primary:focus-visible {
+    outline: 2px solid var(--accent-lime);
+    outline-offset: 2px;
+  }
+
+  /* Mobile Menu Toggle Button */
+  .mobile-menu-btn {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-dark-strong);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-on-dark);
+    padding: 0;
+    z-index: 1002;
+    transition: background 0.15s ease;
+  }
+
+  @media (min-width: 860px) {
+    .mobile-menu-btn {
+      display: none;
+    }
+  }
+
+  .mobile-menu-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .hamburger-icon {
+    width: 18px;
+    height: 14px;
+    position: relative;
+  }
+
+  .hamburger-line {
+    position: absolute;
+    width: 100%;
+    height: 2px;
+    background: var(--text-on-dark);
+    border-radius: 1px;
+    left: 0;
+    transition: transform 0.2s ease, top 0.2s ease, opacity 0.2s ease;
+  }
+
+  .hamburger-line:nth-child(1) { top: 0; }
+  .hamburger-line:nth-child(2) { top: 6px; }
+  .hamburger-line:nth-child(3) { top: 12px; }
+
+  .mobile-menu-btn[aria-expanded="true"] .hamburger-line:nth-child(1) {
+    top: 6px;
+    transform: rotate(45deg);
+  }
+  .mobile-menu-btn[aria-expanded="true"] .hamburger-line:nth-child(2) {
+    opacity: 0;
+  }
+  .mobile-menu-btn[aria-expanded="true"] .hamburger-line:nth-child(3) {
+    top: 6px;
+    transform: rotate(-45deg);
+  }
+
+  /* Mobile Drawer Menu */
+  .mobile-drawer {
+    display: none;
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    right: 0;
+    background: rgba(16, 28, 36, 0.98);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border-dark);
+    padding: 24px clamp(20px, 4vw, 64px) 32px;
+    flex-direction: column;
+    gap: 18px;
+    z-index: 999;
+  }
+
+  .mobile-drawer.open {
+    display: flex;
+  }
+
+  .mobile-nav-link {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-on-dark-muted);
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: color 0.15s ease;
+  }
+
+  .mobile-nav-link:hover, .mobile-nav-link.active {
+    color: var(--text-on-dark);
+    font-weight: 600;
+  }
+
+  /* SECTION 0: Hero / Chapter: Signal to Action */
+  .hero-section {
+    background: var(--bg-dark);
+    color: var(--text-on-dark);
+    padding-top: clamp(40px, 6vw, 72px);
+    padding-bottom: clamp(56px, 8vw, 96px);
+    position: relative;
+    border-bottom: 1px solid var(--border-dark);
+  }
+
+  .hero-headline {
+    font-size: clamp(38px, 6vw, 84px);
+    line-height: 1.08;
+    font-weight: 500;
+    letter-spacing: -0.03em;
+    color: var(--text-on-dark);
+    margin-bottom: clamp(24px, 4vw, 36px);
+    max-width: 1100px;
+  }
+
+  .hero-headline .indent-line {
+    display: block;
+    margin-left: 0;
+  }
+
+  @media (min-width: 1024px) {
+    .hero-headline .indent-line {
+      margin-left: clamp(0px, 8vw, 140px);
+    }
+  }
+
+  .hero-split {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    margin-bottom: clamp(40px, 6vw, 64px);
+  }
+
+  @media (min-width: 860px) {
+    .hero-split {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+  }
+
+  .hero-value-prop {
+    font-size: clamp(15px, 1.8vw, 17px);
+    line-height: 1.6;
+    color: var(--text-on-dark-muted);
+    max-width: 520px;
+  }
+
+  .hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+
+  .hero-actions .explore-link {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-on-dark);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: opacity 0.15s ease;
+  }
+
+  .hero-actions .explore-link:hover {
+    opacity: 0.8;
+  }
+
+  /* Hero Circuit Diagram */
+  .hero-circuit-wrap {
+    border-top: 1px solid var(--border-dark);
+    padding-top: clamp(24px, 4vw, 36px);
+  }
+
+  .circuit-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  @media (min-width: 1024px) {
+    .circuit-grid {
+      grid-template-columns: minmax(260px, 310px) 1.2fr minmax(240px, 290px);
+      gap: 28px;
+      align-items: start;
+    }
+  }
+
+  .circuit-col-title {
+    color: var(--text-on-dark-muted);
+    margin-bottom: 12px;
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .signal-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-dark-strong);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+
+  .signal-card:hover {
+    border-color: rgba(212, 243, 107, 0.4);
+    transform: translateY(-2px);
+  }
+
+  .signal-badge {
+    color: var(--accent-lime);
+    font-size: 11px;
+    margin-bottom: 8px;
+    display: block;
+    font-family: var(--font-mono);
+  }
+
+  .signal-contact {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-on-dark);
+    margin-bottom: 6px;
+  }
+
+  .signal-text {
+    font-size: 12px;
+    color: var(--text-on-dark-muted);
+    font-style: italic;
+    line-height: 1.4;
+  }
+
+  .intel-card {
+    background: var(--bg-dark-card);
+    border: 1px solid var(--border-dark-strong);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+
+  .intel-card:hover {
+    border-color: rgba(157, 178, 255, 0.5);
+    transform: translateY(-2px);
+  }
+
+  .intel-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-on-dark);
+    margin-bottom: 4px;
+  }
+
+  .intel-subtitle {
+    font-size: 12px;
+    color: var(--text-on-dark-muted);
+  }
+
+  .intel-model-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-on-dark-muted);
+    font-family: var(--font-mono);
+  }
+
+  .intel-model-marker {
+    width: 7px;
+    height: 7px;
+    background: var(--accent-lime);
+    border-radius: 1px;
+    display: inline-block;
+  }
+
+  .action-destinations {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .destination-pill {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-dark-strong);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-on-dark);
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .destination-pill:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .destination-pill .arrow {
+    color: var(--text-on-dark-muted);
+    font-size: 12px;
+  }
+
+  .circuit-footnote {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-on-dark-muted);
+    margin-top: 24px;
+    display: block;
+  }
+
+  /* Capability Strip (Transition Banner) */
+  .capability-strip {
+    background: var(--bg-sage);
+    border-top: 1px solid var(--border-light);
+    border-bottom: 1px solid var(--border-light);
+    padding: 20px 0;
+  }
+
+  .capability-inner {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    align-items: center;
+  }
+
+  .capability-item {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .capability-item::before {
+    content: "■";
+    font-size: 8px;
+    color: var(--blue-primary);
+  }
+
+  /* SECTION 1: Interactive Demo (Central Showcase) */
+  .demo-section {
+    background: var(--bg-cream);
+    padding: clamp(64px, 8vw, 104px) 0;
+    scroll-margin-top: var(--header-h);
+    position: relative;
+  }
+
+  .demo-header {
+    margin-bottom: clamp(36px, 5vw, 56px);
+  }
+
+  .demo-headline-split {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  @media (min-width: 900px) {
+    .demo-headline-split {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+  }
+
+  .demo-title {
+    font-size: clamp(32px, 5vw, 56px);
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+  }
+
+  .demo-intro {
+    font-size: clamp(15px, 1.8vw, 16px);
+    line-height: 1.5;
+    color: var(--text-muted);
+    max-width: 460px;
+  }
+
+  .demo-workspace {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 28px;
+    align-items: start;
+  }
+
+  @media (min-width: 1024px) {
+    .demo-workspace {
+      grid-template-columns: minmax(360px, 440px) 1fr;
+      gap: 36px;
+    }
+  }
+
+  /* Intake Form Card (Left) */
+  .intake-card {
+    background: var(--bg-white);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-xl);
+    padding: clamp(24px, 4vw, 36px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+  }
+
+  .intake-kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .intake-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+  }
+
+  .form-group {
+    margin-bottom: 18px;
+  }
+
+  .form-group label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+
+  .form-group .field-hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .form-input, .form-textarea {
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--bg-white);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    color: var(--text-primary);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+
+  .form-input:focus, .form-textarea:focus {
+    outline: none;
+    border-color: var(--blue-primary);
+    box-shadow: 0 0 0 3px rgba(49, 95, 234, 0.18);
+  }
+
+  .form-textarea {
+    resize: vertical;
+    min-height: 96px;
+    line-height: 1.45;
+  }
+
+  .field-error {
+    font-size: 12px;
+    color: var(--accent-red);
+    margin-top: 4px;
+    display: none;
+    font-weight: 500;
+  }
+
+  .form-group.invalid .form-input,
+  .form-group.invalid .form-textarea {
+    border-color: var(--accent-red);
+    background: #FFF8F8;
+  }
+
+  .form-group.invalid .field-error {
+    display: block;
+  }
+
+  .submit-btn-full {
+    width: 100%;
+    padding: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 10px;
+    margin-bottom: 16px;
+    position: relative;
+  }
+
+  .submit-btn-full:disabled {
+    opacity: 0.75;
+    cursor: not-allowed;
+  }
+
+  /* Spinner icon inside button */
+  .btn-spinner {
+    display: none;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    border-top-color: #FFFFFF;
+    animation: spin 0.8s linear infinite;
+  }
+
+  .submitting .btn-spinner {
+    display: inline-block;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .submit-disclaimer {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border-light-subtle);
+    padding-top: 14px;
+  }
+
+  .form-banner {
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    margin-bottom: 20px;
+    display: none;
+    line-height: 1.4;
+  }
+
+  .form-banner.error {
+    display: block;
+    background: #FDEDED;
+    border: 1px solid #F5C2C7;
+    color: #842029;
+  }
+
+  .form-banner.config-missing {
+    display: block;
+    background: #FFF3CD;
+    border: 1px solid #FFE69C;
+    color: #664D03;
+  }
+
+  /* Processing Workspace (Right) */
+  .processing-card {
+    background: var(--bg-sage);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-xl);
+    padding: clamp(24px, 4vw, 36px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+  }
+
+  .proc-kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .proc-title {
+    font-size: clamp(20px, 3vw, 26px);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+    margin-bottom: 28px;
+  }
+
+  .process-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+    padding-left: 20px;
+    margin-bottom: 24px;
+  }
+
+  .process-rail::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 16px;
+    bottom: 24px;
+    width: 2px;
+    background: var(--border-light);
+  }
+
+  .rail-step {
+    position: relative;
+    padding-bottom: 18px;
+  }
+
+  .rail-marker {
+    position: absolute;
+    left: -20px;
+    top: 16px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border-light);
+    border: 2px solid var(--bg-sage);
+    transition: background 0.25s ease, transform 0.25s ease;
+  }
+
+  .rail-step.active .rail-marker {
+    background: var(--blue-primary);
+    transform: scale(1.3);
+  }
+
+  .rail-card {
+    background: var(--bg-cream);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .rail-step.active .rail-card {
+    border-color: var(--blue-primary);
+    box-shadow: 0 2px 10px rgba(49, 95, 234, 0.12);
+  }
+
+  .rail-card.dark-highlight {
+    background: var(--bg-dark-card);
+    border-color: var(--border-dark-strong);
+    color: var(--text-on-dark);
+  }
+
+  .rail-card.dark-highlight .rail-card-title {
+    color: var(--text-on-dark);
+  }
+
+  .rail-card.dark-highlight .rail-card-desc {
+    color: var(--text-on-dark-muted);
+  }
+
+  .rail-card-title {
     font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
     margin-bottom: 3px;
   }
 
-  .step-content p {
-    font-size: 12.5px;
+  .rail-card-desc {
+    font-size: 12px;
     color: var(--text-muted);
-    line-height: 1.45;
   }
 
-  /* Live Inspection Console */
-  .console-box {
-    background: #090d16;
-    border: 1px solid #1e293b;
+  .proc-route-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+  }
+
+  .proc-destinations {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+
+  .proc-destination-pill {
+    background: var(--bg-cream);
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
-    padding: 16px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+
+  .proc-destination-pill .arrow {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .proc-destination-pill.selected {
+    background: var(--bg-dark);
+    color: var(--text-on-dark);
+    border-color: var(--border-dark);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  }
+
+  .proc-destination-pill.selected .arrow {
+    color: var(--accent-lime);
+  }
+
+  /* Status Block */
+  .status-block {
+    background: var(--bg-cream);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+  }
+
+  .status-block-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .status-state-tag {
     font-family: var(--font-mono);
     font-size: 12px;
-  }
-
-  .console-header {
+    font-weight: 600;
+    color: var(--accent-lime-dark);
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #1e293b;
-    color: var(--text-muted);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    gap: 6px;
   }
 
-  .console-code {
-    color: #a5b4fc;
+  .status-state-tag::before {
+    content: "●";
+    font-size: 10px;
+  }
+
+  .status-state-tag.created {
+    color: var(--accent-green);
+  }
+
+  .status-state-tag.duplicate {
+    color: var(--accent-orange);
+  }
+
+  .status-state-tag.error {
+    color: var(--accent-red);
+  }
+
+  .status-block-copy {
+    font-size: 14px;
     line-height: 1.5;
-    word-break: break-all;
-    white-space: pre-wrap;
-    max-height: 140px;
-    overflow-y: auto;
+    color: var(--text-muted);
   }
 
-  /* Features Grid Section */
-  .features-section {
-    padding: 64px 0;
-    border-top: 1px solid var(--border-subtle);
-    background: rgba(17, 24, 39, 0.4);
-  }
-
-  .section-header {
-    text-align: center;
-    max-width: 680px;
-    margin: 0 auto 48px;
-  }
-
-  .section-tag {
+  .status-details-toggle {
+    margin-top: 12px;
+    font-family: var(--font-mono);
     font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #60a5fa;
-    margin-bottom: 8px;
+    color: var(--blue-primary);
+    text-decoration: underline;
+    display: inline-block;
+  }
+
+  .status-details {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-light);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+    display: none;
+  }
+
+  .outcome-panel {
+    display: none;
+    padding: 24px;
+    text-align: center;
+  }
+
+  .outcome-panel.visible {
     display: block;
   }
 
-  .section-title {
-    font-size: 32px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
+  .outcome-icon {
+    font-size: 36px;
     margin-bottom: 12px;
+    line-height: 1;
   }
 
-  .section-desc {
-    color: var(--text-secondary);
-    font-size: 16px;
-  }
-
-  .features-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 24px;
-  }
-
-  .feature-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: 28px;
-    transition: transform 0.15s ease, border-color 0.15s ease;
-  }
-
-  .feature-card:hover {
-    transform: translateY(-2px);
-    border-color: var(--border-strong);
-  }
-
-  .feature-icon {
-    width: 44px;
-    height: 44px;
-    background: rgba(59, 130, 246, 0.12);
-    border-radius: var(--radius-md);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .outcome-title {
     font-size: 20px;
-    margin-bottom: 18px;
-    color: #60a5fa;
-  }
-
-  .feature-card h3 {
-    font-size: 18px;
     font-weight: 600;
-    color: var(--text-primary);
     margin-bottom: 8px;
   }
 
-  .feature-card p {
+  .outcome-desc {
     font-size: 14px;
-    color: var(--text-secondary);
-    line-height: 1.6;
-  }
-
-  /* Architecture Deep-Dive */
-  .arch-section {
-    padding: 64px 0 84px;
-    border-top: 1px solid var(--border-subtle);
-  }
-
-  .arch-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 32px;
-  }
-
-  .arch-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: 32px;
-  }
-
-  .arch-card h3 {
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .arch-card ul {
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .arch-card li {
-    font-size: 14px;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
     line-height: 1.5;
   }
 
-  .arch-card li::before {
-    content: "✓";
-    color: var(--success);
-    font-weight: bold;
-    flex-shrink: 0;
+  /* SECTION 2: How It Works */
+  .how-section {
+    background: var(--bg-white);
+    padding: clamp(64px, 8vw, 104px) 0;
+    border-top: 1px solid var(--border-light);
+    border-bottom: 1px solid var(--border-light);
+    scroll-margin-top: var(--header-h);
   }
 
-  /* Footer */
-  footer {
-    border-top: 1px solid var(--border-subtle);
-    background: var(--bg-surface);
-    padding: 40px 0;
-    margin-top: auto;
+  .how-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(36px, 6vw, 64px);
+  }
+
+  @media (min-width: 960px) {
+    .how-grid {
+      grid-template-columns: minmax(360px, 460px) 1fr;
+    }
+  }
+
+  .how-title {
+    font-size: clamp(32px, 5vw, 56px);
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    margin-bottom: 20px;
+  }
+
+  .how-intro {
+    font-size: clamp(15px, 1.8vw, 16px);
+    line-height: 1.6;
+    color: var(--text-muted);
+    margin-bottom: 32px;
+  }
+
+  .how-diagram-card {
+    background: var(--bg-cream);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: clamp(20px, 3vw, 28px);
+    font-family: var(--font-mono);
+    font-size: clamp(13px, 1.6vw, 15px);
+    line-height: 1.8;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    display: block;
+    max-width: 100%;
+  }
+
+  .how-steps-col {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .how-step-card {
+    background: var(--bg-cream);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-xl);
+    padding: clamp(20px, 3vw, 32px);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+
+  .how-step-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(49, 95, 234, 0.4);
+  }
+
+  .how-step-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  .how-step-name {
+    font-size: clamp(22px, 3vw, 28px);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+  }
+
+  .how-step-desc {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-muted);
+  }
+
+  /* SECTION 3: Technical Architecture */
+  .arch-section {
+    background: var(--bg-cream);
+    padding: clamp(64px, 8vw, 104px) 0;
+    scroll-margin-top: var(--header-h);
+  }
+
+  .arch-title {
+    font-size: clamp(32px, 5vw, 56px);
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+  }
+
+  .arch-intro {
+    font-size: clamp(15px, 1.8vw, 16px);
+    line-height: 1.5;
+    color: var(--text-muted);
+    margin-bottom: 40px;
+    max-width: 600px;
+  }
+
+  .arch-bus-wrap {
+    background: var(--bg-white);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-xl);
+    padding: clamp(24px, 4vw, 36px);
+    margin-bottom: 40px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+  }
+
+  .arch-phase-labels {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-light);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+  }
+
+  .arch-phase-labels span:nth-child(2) { text-align: center; }
+  .arch-phase-labels span:nth-child(3) { text-align: right; }
+
+  /* 4-col 2-row architecture grid matching Figma */
+  .arch-nodes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  @media (min-width: 900px) {
+    .arch-nodes-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  .arch-node {
+    background: var(--bg-cream);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+
+  .arch-node:hover {
+    transform: translateY(-2px);
+    border-color: rgba(49, 95, 234, 0.3);
+  }
+
+  .arch-node.dark-hero {
+    background: var(--bg-dark-card);
+    border-color: var(--border-dark-strong);
+    color: var(--text-on-dark);
+  }
+
+  .arch-node.dark-hero .arch-node-name { color: var(--text-on-dark); }
+  .arch-node.dark-hero .arch-node-role { color: var(--text-on-dark-muted); }
+
+  .arch-node-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+  }
+
+  .arch-node-role {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .arch-fallback-pill {
+    background: var(--bg-sage);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    letter-spacing: 0.04em;
+  }
+
+  .arch-columns {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 32px;
+    margin-bottom: 24px;
+  }
+
+  @media (min-width: 768px) {
+    .arch-columns {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .arch-col-kicker {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .arch-col-text {
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+
+  .arch-footnote {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    display: block;
+  }
+
+  /* SECTION 4: Reliability and Transparency */
+  .rel-section {
+    background: var(--bg-white);
+    padding: clamp(64px, 8vw, 104px) 0;
+    border-top: 1px solid var(--border-light);
+    border-bottom: 1px solid var(--border-light);
+    scroll-margin-top: var(--header-h);
+  }
+
+  .rel-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(36px, 6vw, 64px);
+  }
+
+  @media (min-width: 960px) {
+    .rel-grid {
+      grid-template-columns: minmax(360px, 460px) 1fr;
+    }
+  }
+
+  .rel-title {
+    font-size: clamp(32px, 5vw, 56px);
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    margin-bottom: 28px;
+  }
+
+  .rel-stance-card {
+    background: var(--bg-sage);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-xl);
+    padding: clamp(24px, 4vw, 36px);
+  }
+
+  .rel-stance-head {
+    font-size: clamp(22px, 3vw, 26px);
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    letter-spacing: -0.01em;
+  }
+
+  .rel-stance-desc {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    opacity: 0.85;
+  }
+
+  .rel-principles-list {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .rel-principle-item {
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 22px;
+    transition: transform 0.15s ease;
+  }
+
+  .rel-principle-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .principle-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+
+  .principle-desc {
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  .principle-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+  }
+
+  /* SECTION 5: Closing CTA */
+  .cta-section {
+    background: var(--bg-cream);
+    padding: clamp(56px, 8vw, 88px) 0 clamp(40px, 6vw, 64px);
+  }
+
+  .cta-card {
+    background: var(--bg-sage);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-2xl);
+    padding: clamp(36px, 6vw, 64px);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+  }
+
+  .cta-kicker {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .cta-title {
+    font-size: clamp(32px, 5.5vw, 64px);
+    line-height: 1.1;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+    max-width: 760px;
+  }
+
+  .cta-desc {
+    font-size: clamp(15px, 1.8vw, 17px);
+    line-height: 1.6;
+    color: var(--text-muted);
+    max-width: 540px;
+    margin-bottom: 32px;
+  }
+
+  /* Site Footer */
+  .site-footer {
+    background: var(--bg-dark);
+    color: var(--text-on-dark);
+    padding: 64px 0 48px;
+    border-top: 1px solid var(--border-dark);
   }
 
   .footer-inner {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 20px;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  .footer-top {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+
+  @media (min-width: 768px) {
+    .footer-top {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
   }
 
   .footer-brand {
+    max-width: 440px;
+  }
+
+  .footer-brand .brand-identity {
+    margin-bottom: 14px;
+  }
+
+  .footer-desc {
     font-size: 14px;
-    color: var(--text-muted);
+    line-height: 1.6;
+    color: var(--text-on-dark-muted);
   }
 
-  .footer-tech {
+  .footer-nav {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 14px;
   }
 
-  .tech-pill {
-    font-size: 12px;
+  @media (min-width: 640px) {
+    .footer-nav {
+      flex-direction: row;
+      gap: 32px;
+    }
+  }
+
+  .footer-link {
+    font-size: 14px;
     font-weight: 500;
-    color: var(--text-secondary);
-    background: var(--bg-card);
-    border: 1px solid var(--border-subtle);
-    padding: 4px 10px;
-    border-radius: 999px;
+    color: var(--text-on-dark-muted);
+    transition: color 0.15s ease;
   }
 
-  [hidden] { display: none !important; }
-
-  /* Responsive Design */
-  @media (max-width: 960px) {
-    .demo-grid, .features-grid, .arch-grid {
-      grid-template-columns: 1fr;
-    }
-    .hero-title {
-      font-size: 32px;
-    }
-    .nav-links {
-      display: none;
-    }
-    .form-card {
-      padding: 28px 20px;
-    }
+  .footer-link:hover {
+    color: var(--text-on-dark);
   }
 
-  @media (max-width: 480px) {
-    .container {
-      padding: 0 16px;
-    }
-    .hero-title {
-      font-size: 26px;
-    }
-    .hero-subtitle {
-      font-size: 15px;
-    }
-    .footer-inner {
-      flex-direction: column;
-      align-items: flex-start;
-    }
+  .footer-bottom {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-on-dark-muted);
+    padding-top: 24px;
+    border-top: 1px solid var(--border-dark);
   }
 </style>
 </head>
 <body>
 
-<!-- Header Navigation -->
-<nav class="navbar">
-  <div class="container nav-inner">
-    <a href="#" class="brand">
-      <div class="brand-logo">L</div>
-      <span class="brand-title">LeadIntel</span>
-      <span class="brand-badge">Automation</span>
-    </a>
-    <div class="nav-links">
-      <a href="#demo" class="nav-link">Live Demo</a>
-      <a href="#how-it-works" class="nav-link">Pipeline Flow</a>
-      <a href="#architecture" class="nav-link">Architecture</a>
-      <div class="status-pill">
-        <span class="status-dot"></span>
-        <span>Engine Active</span>
-      </div>
-    </div>
-    <a href="#demo" class="nav-cta">Test Submission</a>
-  </div>
-</nav>
+<!-- Reading Progress Bar -->
+<div class="reading-progress-bar" id="reading-progress" aria-hidden="true"></div>
 
-<!-- Hero Section -->
-<header class="hero-section">
-  <div class="hero-glow"></div>
+<!-- Header / Navigation -->
+<header class="site-header" id="site-header">
   <div class="container">
-    <div class="hero-content">
-      <div class="hero-eyebrow">
-        <span>⚡ Enterprise Lead Automation Platform</span>
-      </div>
-      <h1 class="hero-title">Automated Inbound Lead Qualification & Intelligent Routing</h1>
-      <p class="hero-subtitle">
-        Eliminate manual triage latency. Ingest, validate, deduplicate, score, and alert sales teams in under 500 milliseconds using FastAPI, PostgreSQL, n8n orchestration, Telegram, and WhatsApp Business.
-      </p>
-      <div class="hero-metrics">
-        <div class="metric-badge">⚡ Sub-Second Ingestion</div>
-        <div class="metric-badge">🛡️ Zero Duplicate Leaks</div>
-        <div class="metric-badge">🤖 OpenRouter LLM + Fallback</div>
-        <div class="metric-badge">📲 Telegram & WhatsApp Alerts</div>
+    <div class="nav-inner">
+      <a href="#hero" class="brand-identity" aria-label="LeadIntel Home">
+        <svg class="brand-logo-svg" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect x="1" y="1" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
+          <rect x="18" y="1" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
+          <rect x="18" y="18" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
+        </svg>
+        <span class="brand-wordmark">LeadIntel</span>
+      </a>
+
+      <!-- Desktop Nav -->
+      <nav class="desktop-nav" aria-label="Primary Navigation">
+        <a href="#how-it-works" class="nav-link" data-section="how-it-works">How it works</a>
+        <a href="#demo" class="nav-link" data-section="demo">Interactive demo</a>
+        <a href="#architecture" class="nav-link" data-section="architecture">Architecture</a>
+        <a href="#reliability" class="nav-link" data-section="reliability">Reliability</a>
+      </nav>
+
+      <div class="nav-cta-wrap">
+        <a href="#demo" class="btn-primary">Try the demo</a>
+
+        <!-- Mobile Menu Toggle Button -->
+        <button type="button" class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="mobile-drawer">
+          <span class="hamburger-icon">
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+          </span>
+        </button>
       </div>
     </div>
+  </div>
+
+  <!-- Mobile Drawer Menu -->
+  <div class="mobile-drawer" id="mobile-drawer" role="region" aria-label="Mobile Navigation">
+    <a href="#demo" class="mobile-nav-link" data-section="demo">Interactive demo</a>
+    <a href="#how-it-works" class="mobile-nav-link" data-section="how-it-works">How it works</a>
+    <a href="#architecture" class="mobile-nav-link" data-section="architecture">Architecture</a>
+    <a href="#reliability" class="mobile-nav-link" data-section="reliability">Reliability</a>
+    <a href="#demo" class="btn-primary" style="margin-top: 8px;">Try the demo &rarr;</a>
   </div>
 </header>
 
-<!-- Main Interactive Demo Section -->
-<main class="demo-section" id="demo">
-  <div class="container">
-    <div class="demo-grid">
-      <!-- Submission Form Card -->
-      <div class="form-card">
-        <div id="config-banner" class="banner error" role="alert" hidden></div>
+<main>
+  <!-- CHAPTER 0: Hero / Signal to action -->
+  <section class="hero-section" id="hero" data-section="hero">
+    <div class="container">
+      <div class="section-chapter-tag dark">
+        <span class="tag-dot"></span>
+        <span>Overview / Autonomous Qualification</span>
+      </div>
 
-        <div class="card-header">
-          <span class="card-tag">Interactive Demo</span>
-          <h2 class="card-title">Inbound Lead Submission</h2>
-          <p class="card-desc">Submit a mock enquiry below to watch the intake pipeline validate, persist, score, and route the lead in real time.</p>
-        </div>
+      <h1 class="hero-headline">
+        Turn incoming leads
+        <span class="indent-line">into actionable</span>
+        <span class="indent-line">opportunities.</span>
+      </h1>
 
-        <form id="lead-form" novalidate>
-          <div id="banner" class="banner" role="alert" aria-live="assertive"></div>
-
-          <div class="field" id="field-name">
-            <label for="name">Contact Name <span class="req" aria-hidden="true">*</span></label>
-            <input id="name" name="name" type="text" autocomplete="name"
-                   placeholder="Ada Lovelace" required aria-required="true"
-                   aria-describedby="name-error">
-            <p class="field-error" id="name-error" hidden></p>
-          </div>
-
-          <div class="field" id="field-email">
-            <label for="email">Work Email <span class="req" aria-hidden="true">*</span></label>
-            <input id="email" name="email" type="email" autocomplete="email"
-                   inputmode="email" placeholder="ada@company.com" required
-                   aria-required="true" aria-describedby="email-error">
-            <p class="field-error" id="email-error" hidden></p>
-          </div>
-
-          <div class="field" id="field-company">
-            <label for="company">Company Name <span class="req" aria-hidden="true">*</span></label>
-            <input id="company" name="company" type="text" autocomplete="organization"
-                   placeholder="Analytical Engines Ltd" required aria-required="true"
-                   aria-describedby="company-error">
-            <p class="field-error" id="company-error" hidden></p>
-          </div>
-
-          <div class="field" id="field-message">
-            <label for="message">Project Requirements / Buying Intent <span class="req" aria-hidden="true">*</span></label>
-            <textarea id="message" name="message" rows="4" required aria-required="true"
-                      aria-describedby="message-error"
-                      placeholder="e.g., We have a team of 40 looking to automate enterprise inbound pipeline scoring this quarter..."></textarea>
-            <p class="field-error" id="message-error" hidden></p>
-          </div>
-
-          <button type="submit" id="submit-btn">
-            <span class="spinner" aria-hidden="true"></span>
-            <span id="submit-label">Submit Inbound Lead</span>
-          </button>
-          <p class="note">Encrypted same-origin transit. PII is sanitized prior to external notification dispatch.</p>
-        </form>
-
-        <!-- Success Outcome Panel -->
-        <div id="success-panel" class="outcome success" hidden tabindex="-1">
-          <div class="mark" aria-hidden="true">&#10003;</div>
-          <h2>Lead Successfully Ingested</h2>
-          <p>Your lead has passed validation, was stored in PostgreSQL, evaluated by the scoring engine, and routed to sales alert channels.</p>
-          <button type="button" class="secondary" id="success-reset">Submit Another Lead</button>
-        </div>
-
-        <!-- Duplicate Outcome Panel -->
-        <div id="duplicate-panel" class="outcome duplicate" hidden tabindex="-1">
-          <div class="mark" aria-hidden="true">&#10003;</div>
-          <h2>Duplicate Submission Detected</h2>
-          <p>This lead was previously ingested with the same source key. The idempotency guard prevented duplicate record creation and re-alerting.</p>
-          <button type="button" class="secondary" id="duplicate-reset">Start A New Lead</button>
+      <div class="hero-split">
+        <p class="hero-value-prop">
+          Validate enquiries, identify duplicates, prioritize leads, and route the next action through one traceable, fault-tolerant workflow.
+        </p>
+        <div class="hero-actions">
+          <a href="#demo" class="btn-primary">Try the interactive demo</a>
+          <a href="#how-it-works" class="explore-link">Explore how it works &nearr;</a>
         </div>
       </div>
 
-      <!-- Telemetry & Pipeline Inspector Card -->
-      <div class="telemetry-card">
-        <div class="telemetry-header">
-          <h3 class="telemetry-title">
-            <span>Pipeline Telemetry & Diagnostics</span>
-            <span class="brand-badge">Live Monitor</span>
-          </h3>
-          <p class="telemetry-desc">How your submission traverses the system architecture:</p>
+      <!-- Illustrative Circuit graphic -->
+      <div class="hero-circuit-wrap">
+        <div class="circuit-grid">
+          <!-- Signal Column -->
+          <div>
+            <span class="circuit-col-title">Signal / Enquiry record</span>
+            <div class="signal-card" tabindex="0" role="region" aria-label="Illustrative enquiry record">
+              <span class="signal-badge">INBOUND.ENQUIRY</span>
+              <div class="signal-contact">Alex Morgan / Northline</div>
+              <div class="signal-text">&ldquo;We need a clearer way to qualify inbound enquiries.&rdquo;</div>
+            </div>
+          </div>
+
+          <!-- Intelligence Column -->
+          <div>
+            <span class="circuit-col-title">Intelligence / Interpret the signal</span>
+            <div class="intel-card" tabindex="0" role="region" aria-label="Intelligence processing stage">
+              <div class="intel-title">Validation &rarr; duplicate check</div>
+              <div class="intel-subtitle">Required information &middot; persistent record</div>
+            </div>
+            <div class="intel-model-badge">
+              <span class="intel-model-marker"></span>
+              <span>Configurable LLM &rarr; deterministic fallback</span>
+            </div>
+          </div>
+
+          <!-- Action Column -->
+          <div>
+            <span class="circuit-col-title">Action / Possible paths</span>
+            <div class="action-destinations">
+              <div class="destination-pill" tabindex="0">
+                <span>Manual review</span>
+                <span class="arrow">&nearr;</span>
+              </div>
+              <div class="destination-pill" tabindex="0">
+                <span>Not qualified</span>
+                <span class="arrow">&nearr;</span>
+              </div>
+              <div class="destination-pill" tabindex="0">
+                <span>Qualified</span>
+                <span class="arrow">&nearr;</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <span class="circuit-footnote">Illustrative workflow &mdash; not live execution.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Capability Transition Strip -->
+  <aside class="capability-strip" aria-label="Key Capabilities">
+    <div class="container">
+      <div class="capability-inner">
+        <span class="capability-item">Structured intake</span>
+        <span class="capability-item">Duplicate prevention</span>
+        <span class="capability-item">Intelligent scoring with fallback</span>
+        <span class="capability-item">Qualification and routing</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- CHAPTER 1: Interactive demo (The Central Application Experience) -->
+  <section class="demo-section" id="demo" data-section="demo">
+    <div class="container">
+      <div class="demo-header">
+        <div class="section-chapter-tag light">
+          <span class="tag-dot"></span>
+          <span>Chapter 01 / Live Interactive Demo</span>
+        </div>
+        <div class="demo-headline-split">
+          <h2 class="demo-title">Start with one enquiry.</h2>
+          <p class="demo-intro">
+            Follow the logic from structured intake to a possible next action. One enquiry. One traceable path.
+          </p>
+        </div>
+      </div>
+
+      <div class="demo-workspace">
+        <!-- Enquiry Intake Form (Left) -->
+        <div class="intake-card">
+          <div class="intake-kicker">Input / Your test enquiry</div>
+          <div class="intake-sub">All fields are required. Submissions run through live ingestion.</div>
+
+          <div id="config-banner" class="form-banner config-missing" hidden></div>
+          <div id="banner" class="form-banner" role="alert" aria-live="polite"></div>
+
+          <!-- Outcome: Success -->
+          <div id="success-panel" class="outcome-panel" role="region" aria-label="Lead Created Successfully" tabindex="-1">
+            <div class="outcome-icon">&check;</div>
+            <h3 class="outcome-title">Lead Created &amp; Evaluated</h3>
+            <p class="outcome-desc">
+              Your test lead was persisted to PostgreSQL, scored via the pipeline, and evaluated for automated dispatch.
+            </p>
+            <button type="button" id="success-reset" class="btn-primary">Submit another enquiry</button>
+          </div>
+
+          <!-- Outcome: Duplicate -->
+          <div id="duplicate-panel" class="outcome-panel" role="region" aria-label="Duplicate Lead Detected" tabindex="-1">
+            <div class="outcome-icon">&odot;</div>
+            <h3 class="outcome-title">Duplicate Lead Detected</h3>
+            <p class="outcome-desc">
+              This client-generated external ID was already ingested. Duplicate prevention kept the existing record intact without duplicate contamination.
+            </p>
+            <button type="button" id="duplicate-reset" class="btn-primary">Reset enquiry form</button>
+          </div>
+
+          <!-- The Lead Intake Form -->
+          <form id="lead-form" novalidate>
+            <div class="form-group" id="field-name">
+              <label for="name">Contact name *</label>
+              <input type="text" id="name" name="name" class="form-input" placeholder="Alex Morgan" required autocomplete="name" data-rail-step="1">
+              <div class="field-hint">Who should we follow up with?</div>
+              <div class="field-error" id="name-error"></div>
+            </div>
+
+            <div class="form-group" id="field-email">
+              <label for="email">Work email *</label>
+              <input type="email" id="email" name="email" class="form-input" placeholder="alex@company.com" required autocomplete="email" data-rail-step="1">
+              <div class="field-hint">Use a valid work email for follow-up.</div>
+              <div class="field-error" id="email-error"></div>
+            </div>
+
+            <div class="form-group" id="field-company">
+              <label for="company">Company *</label>
+              <input type="text" id="company" name="company" class="form-input" placeholder="Northline" required autocomplete="organization" data-rail-step="2">
+              <div class="field-hint">Your company or organisation.</div>
+              <div class="field-error" id="company-error"></div>
+            </div>
+
+            <div class="form-group" id="field-message">
+              <label for="message">Enquiry message *</label>
+              <textarea id="message" name="message" class="form-textarea" placeholder="We need a clearer way to qualify inbound enquiries…" required data-rail-step="3"></textarea>
+              <div class="field-hint">Include your needs and relevant context.</div>
+              <div class="field-error" id="message-error"></div>
+            </div>
+
+            <button type="submit" id="submit-btn" class="btn-primary submit-btn-full">
+              <span class="btn-spinner"></span>
+              <span id="submit-label">Submit test lead</span>
+            </button>
+
+            <div class="submit-disclaimer">
+              Connected live demo &mdash; sends payload to <code>/webhook/lead-intake</code> to test validation, deduplication, scoring, and notification routing.
+            </div>
+          </form>
         </div>
 
-        <div class="pipeline-flow">
-          <div class="flow-step">
-            <div class="step-num">1</div>
-            <div class="step-content">
-              <h4>Caddy Proxy & Webhook Ingestion</h4>
-              <p>HTTP access control verifies headers; passes directly to the isolated loopback n8n intake webhook.</p>
+        <!-- Processing Workspace (Right) -->
+        <div class="processing-card">
+          <div class="proc-kicker">Live Trace / Pipeline Execution</div>
+          <h3 class="proc-title">How the workflow processes your lead</h3>
+
+          <div class="process-rail">
+            <!-- Step 1 -->
+            <div class="rail-step" id="rail-step-1">
+              <span class="rail-marker"></span>
+              <div class="rail-card">
+                <div class="rail-card-title">Receive and validate</div>
+                <div class="rail-card-desc">Required fields and input format</div>
+              </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="rail-step" id="rail-step-2">
+              <span class="rail-marker"></span>
+              <div class="rail-card">
+                <div class="rail-card-title">Check for duplicates</div>
+                <div class="rail-card-desc">Compare against existing records</div>
+              </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="rail-step" id="rail-step-3">
+              <span class="rail-marker"></span>
+              <div class="rail-card">
+                <div class="rail-card-title">Persist the record</div>
+                <div class="rail-card-desc">PostgreSQL &middot; retain enquiry context</div>
+              </div>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="rail-step" id="rail-step-4">
+              <span class="rail-marker"></span>
+              <div class="rail-card dark-highlight">
+                <div class="rail-card-title">Score the lead</div>
+                <div class="rail-card-desc">Configurable LLM / deterministic fallback</div>
+              </div>
             </div>
           </div>
 
-          <div class="flow-step">
-            <div class="step-num">2</div>
-            <div class="step-content">
-              <h4>FastAPI Validation & Idempotency</h4>
-              <p>Pydantic enforces strict contract. PostgreSQL checks unique <code>(source, external_id)</code> index to reject duplicates (409).</p>
+          <div class="proc-route-header">Route the outcome and applicable notifications</div>
+          <div class="proc-destinations">
+            <div class="proc-destination-pill" id="dest-manual">
+              <span>Manual review</span>
+              <span class="arrow">&nearr;</span>
+            </div>
+            <div class="proc-destination-pill" id="dest-unqualified">
+              <span>Not qualified</span>
+              <span class="arrow">&nearr;</span>
+            </div>
+            <div class="proc-destination-pill" id="dest-qualified">
+              <span>Qualified</span>
+              <span class="arrow">&nearr;</span>
             </div>
           </div>
 
-          <div class="flow-step">
-            <div class="step-num">3</div>
-            <div class="step-content">
-              <h4>OpenRouter LLM + Fallback Scoring</h4>
-              <p>AI evaluates budget, authority, and urgency. Deterministic heuristic fallback activates automatically if provider times out.</p>
+          <!-- Dynamic Status Block -->
+          <div class="status-block" id="status-block">
+            <div class="status-block-header">
+              <span class="status-state-tag" id="status-state-label">Awaiting submission</span>
+              <span class="mono-kicker" id="external-id-badge" style="color: var(--text-dim);">ID: Ready</span>
+            </div>
+            <p class="status-block-copy" id="status-block-desc">
+              No result yet. When you submit a test lead, the pipeline records the enquiry, executes qualification scoring, and surfaces the routed outcome.
+            </p>
+            <a href="javascript:void(0)" class="status-details-toggle" id="details-toggle">View payload telemetry &darr;</a>
+            <div class="status-details" id="status-details">
+              <pre id="payload-preview" style="white-space: pre-wrap; word-break: break-all;"></pre>
             </div>
           </div>
-
-          <div class="flow-step">
-            <div class="step-num">4</div>
-            <div class="step-content">
-              <h4>Dual-Channel Operator Dispatch</h4>
-              <p>Scores &ge; 70 trigger instant Telegram and WhatsApp Business Cloud alerts with isolated failure resilience.</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="console-box">
-          <div class="console-header">
-            <span>Outbound Webhook Payload Preview</span>
-            <span id="external-id-badge">ID: generating...</span>
-          </div>
-          <div class="console-code" id="payload-preview">/* Payload preview updates dynamically as you type */</div>
         </div>
       </div>
     </div>
-  </div>
+  </section>
+
+  <!-- CHAPTER 2: How it works (The Editorial Process) -->
+  <section class="how-section" id="how-it-works" data-section="how-it-works">
+    <div class="container">
+      <div class="section-chapter-tag light">
+        <span class="tag-dot"></span>
+        <span>Chapter 02 / Explicit Lifecycle Stages</span>
+      </div>
+
+      <div class="how-grid">
+        <div>
+          <h2 class="how-title">A signal is only the beginning.</h2>
+          <p class="how-intro">
+            Make each transition explicit: what comes in, how it is interpreted, and where it can go next.
+          </p>
+
+          <div class="how-diagram-card">SIGNAL
+    &darr;
+INTELLIGENCE
+    └──&rarr; ACTION</div>
+        </div>
+
+        <div class="how-steps-col">
+          <!-- Step 1 -->
+          <div class="how-step-card">
+            <span class="how-step-num">01</span>
+            <h3 class="how-step-name">Capture</h3>
+            <p class="how-step-desc">Collect inbound enquiries through a structured form with immediate client-side and server-side validation.</p>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="how-step-card">
+            <span class="how-step-num">02</span>
+            <h3 class="how-step-name">Validate</h3>
+            <p class="how-step-desc">Validate payload integrity and enforce idempotency against existing records using composite database constraints.</p>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="how-step-card">
+            <span class="how-step-num">03</span>
+            <h3 class="how-step-name">Prioritize</h3>
+            <p class="how-step-desc">Configurable LLM scoring with guaranteed deterministic heuristic fallback when third-party APIs timeout.</p>
+          </div>
+
+          <!-- Step 4 -->
+          <div class="how-step-card">
+            <span class="how-step-num">04</span>
+            <h3 class="how-step-name">Route</h3>
+            <p class="how-step-desc">Explicit qualification rules dispatch alerts to Telegram, WhatsApp Business, or manual operational queues.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHAPTER 3: Technical architecture (The System Blueprint) -->
+  <section class="arch-section" id="architecture" data-section="architecture">
+    <div class="container">
+      <div class="section-chapter-tag light">
+        <span class="tag-dot"></span>
+        <span>Chapter 03 / System Architecture</span>
+      </div>
+
+      <h2 class="arch-title">One connected system.<br>Explicit responsibilities.</h2>
+      <p class="arch-intro">
+        From web entry to configured notifications, keep the handoffs visible and boundaries deterministic.
+      </p>
+
+      <div class="arch-bus-wrap">
+        <div class="arch-phase-labels">
+          <span>Signal</span>
+          <span>Intelligence</span>
+          <span>Action</span>
+        </div>
+
+        <div class="arch-nodes-grid">
+          <div class="arch-node">
+            <div class="arch-node-name">Web Form</div>
+            <div class="arch-node-role">Structured enquiry</div>
+          </div>
+          <div class="arch-node">
+            <div class="arch-node-name">Caddy</div>
+            <div class="arch-node-role">Web entry / reverse proxy</div>
+          </div>
+          <div class="arch-node">
+            <div class="arch-node-name">n8n</div>
+            <div class="arch-node-role">Orchestration and routing</div>
+          </div>
+          <div class="arch-node dark-hero">
+            <div class="arch-node-name">FastAPI</div>
+            <div class="arch-node-role">Validation &middot; business rules &middot; scoring</div>
+          </div>
+          <div class="arch-node">
+            <div class="arch-node-name">PostgreSQL</div>
+            <div class="arch-node-role">Persistent enquiry records</div>
+          </div>
+          <div class="arch-node">
+            <div class="arch-node-name">Scoring</div>
+            <div class="arch-node-role">Configurable LLM / fallback</div>
+          </div>
+          <div class="arch-node">
+            <div class="arch-node-name">Qualification</div>
+            <div class="arch-node-role">Qualified / not qualified / manual</div>
+          </div>
+          <div class="arch-node">
+            <div class="arch-node-name">Notifications</div>
+            <div class="arch-node-role">WhatsApp &amp; Telegram dispatch</div>
+          </div>
+        </div>
+
+        <div class="arch-fallback-pill">
+          IF LLM UNAVAILABLE &rarr; DETERMINISTIC FALLBACK
+        </div>
+      </div>
+
+      <div class="arch-columns">
+        <div>
+          <div class="arch-col-kicker">Intelligence / Deterministic by design</div>
+          <p class="arch-col-text">
+            FastAPI applies validation, business rules and scoring. PostgreSQL holds persistent records. The LLM is configurable; deterministic fallback provides an alternative when model scoring is unavailable.
+          </p>
+        </div>
+        <div>
+          <div class="arch-col-kicker">Action / Configuration sets the route</div>
+          <p class="arch-col-text">
+            n8n orchestrates the workflow and routes qualification paths. Notifications use configured channels only; a route does not imply successful delivery.
+          </p>
+        </div>
+      </div>
+
+      <span class="arch-footnote">Architecture design &mdash; verified with 97 automated tests and end-to-end rehearsal drills.</span>
+    </div>
+  </section>
+
+  <!-- CHAPTER 4: Reliability and transparency (Operational Guarantees) -->
+  <section class="rel-section" id="reliability" data-section="reliability">
+    <div class="container">
+      <div class="section-chapter-tag light">
+        <span class="tag-dot"></span>
+        <span>Chapter 04 / Operational Resilience</span>
+      </div>
+
+      <div class="rel-grid">
+        <div>
+          <h2 class="rel-title">Clarity includes what happens when it doesn&rsquo;t work.</h2>
+          <div class="rel-stance-card">
+            <div class="rel-stance-head">No silent assumptions.</div>
+            <p class="rel-stance-desc">
+              Handling principles implemented to prevent data loss, eliminate duplicate alerts, and guarantee auditability under stress.
+            </p>
+          </div>
+        </div>
+
+        <div class="rel-principles-list">
+          <div class="rel-principle-item">
+            <h3 class="principle-title">Input validation</h3>
+            <p class="principle-desc">Required information and format checks surface actionable field errors.</p>
+            <span class="principle-tag">CHECK THE INPUT</span>
+          </div>
+
+          <div class="rel-principle-item">
+            <h3 class="principle-title">Duplicate handling</h3>
+            <p class="principle-desc">Potential matches are made explicit before a record is treated as new.</p>
+            <span class="principle-tag">PRESERVE CONTEXT</span>
+          </div>
+
+          <div class="rel-principle-item">
+            <h3 class="principle-title">Scoring fallback</h3>
+            <p class="principle-desc">Use deterministic rules when configured model scoring cannot provide a usable result.</p>
+            <span class="principle-tag">KEEP A FALLBACK</span>
+          </div>
+
+          <div class="rel-principle-item">
+            <h3 class="principle-title">Explicit qualification paths</h3>
+            <p class="principle-desc">Represent qualified, not qualified and manual review as distinct possible routes.</p>
+            <span class="principle-tag">NAME THE NEXT STEP</span>
+          </div>
+
+          <div class="rel-principle-item">
+            <h3 class="principle-title">Observable workflow failures</h3>
+            <p class="principle-desc">Expose uncertain outcomes. Check records before retrying to avoid duplicates.</p>
+            <span class="principle-tag">DO NOT ASSUME DELIVERY</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHAPTER 5: Next step CTA -->
+  <section class="cta-section" data-section="cta">
+    <div class="container">
+      <div class="cta-card">
+        <div class="section-chapter-tag light" style="margin-bottom: 16px;">
+          <span class="tag-dot"></span>
+          <span>Chapter 05 / Next Step</span>
+        </div>
+        <h2 class="cta-title">See what a better lead workflow looks like.</h2>
+        <p class="cta-desc">
+          Start with a test enquiry and explore how validation, scoring and routing fit together in a real deployment.
+        </p>
+        <a href="#demo" class="btn-primary">Try the interactive demo &rarr;</a>
+      </div>
+    </div>
+  </section>
 </main>
 
-<!-- Features / System Capabilities -->
-<section class="features-section" id="how-it-works">
+<!-- Site Footer -->
+<footer class="site-footer">
   <div class="container">
-    <div class="section-header">
-      <span class="section-tag">Enterprise Readiness</span>
-      <h2 class="section-title">Built For Reliability Under Pressure</h2>
-      <p class="section-desc">Designed with defensive distributed system principles: idempotent ingest, fail-open scoring, and decoupled notifications.</p>
-    </div>
+    <div class="footer-inner">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <a href="#hero" class="brand-identity" aria-label="LeadIntel Home">
+            <svg class="brand-logo-svg" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect x="1" y="1" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
+              <rect x="18" y="1" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
+              <rect x="18" y="18" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
+            </svg>
+            <span class="brand-wordmark">LeadIntel</span>
+          </a>
+          <p class="footer-desc">
+            LeadIntel brings structured enquiry intake, scoring and qualification into one traceable, fault-tolerant workflow.
+          </p>
+        </div>
 
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon">🛡️</div>
-        <h3>PostgreSQL Idempotency</h3>
-        <p>A composite unique constraint on source and client external ID guarantees that re-transmissions and network retries never generate ghost leads or duplicate CRM records.</p>
+        <nav class="footer-nav" aria-label="Footer Links">
+          <a href="#how-it-works" class="footer-link">How it works</a>
+          <a href="#demo" class="footer-link">Interactive demo</a>
+          <a href="#architecture" class="footer-link">Architecture</a>
+          <a href="#reliability" class="footer-link">Reliability</a>
+        </nav>
       </div>
 
-      <div class="feature-card">
-        <div class="feature-icon">🤖</div>
-        <h3>Dual-Engine Scoring</h3>
-        <p>Configurable OpenRouter LLM evaluates buying intent against a 0–100 rubric. If the LLM provider fails or times out, a local deterministic heuristic takes over seamlessly.</p>
+      <div class="footer-bottom">
+        LeadIntel / Signal &rarr; Intelligence &rarr; Action
       </div>
-
-      <div class="feature-card">
-        <div class="feature-icon">📲</div>
-        <h3>Telegram & WhatsApp Dispatch</h3>
-        <p>High-priority leads trigger instant mobile alerts via Telegram and WhatsApp Business Cloud API. Downstream messaging errors never drop or delay the intake HTTP 201 response.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon">🔒</div>
-        <h3>Privacy By Design</h3>
-        <p>Free-text customer messages are stripped before triggering external webhook alerts. Only sanitized metadata (name, company, email, score, lead ID) travels to external messaging apps.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon">📊</div>
-        <h3>Audit Trail Persisted</h3>
-        <p>Every scoring decision, qualification threshold check, and notification outcome is recorded in n8n's execution history for complete operational observability.</p>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon">⚡</div>
-        <h3>Zero-Framework Frontend</h3>
-        <p>Self-contained vanilla HTML5/CSS/JavaScript with zero third-party CDNs or tracking scripts. Fast initial paint, responsive down to 320px mobile screens.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Architecture Section -->
-<section class="arch-section" id="architecture">
-  <div class="container">
-    <div class="section-header">
-      <span class="section-tag">Engineering Highlights</span>
-      <h2 class="section-title">Fault Isolation & Defensive Architecture</h2>
-      <p class="section-desc">Clear boundaries between edge proxy, orchestration engine, database, and notification buses.</p>
-    </div>
-
-    <div class="arch-grid">
-      <div class="arch-card">
-        <h3><span>⚡</span> Pipeline Execution Order</h3>
-        <ul>
-          <li><strong>Webhook Ingestion:</strong> n8n captures inbound JSON payload and formats schema.</li>
-          <li><strong>Early Response:</strong> <code>Respond Created</code> issues HTTP 201 to caller before async notification dispatch.</li>
-          <li><strong>Audit Persistence:</strong> Execution record is generated regardless of external channel availability.</li>
-          <li><strong>Parallel Delivery:</strong> Telegram and WhatsApp notification branches run concurrently with isolated error boundaries.</li>
-        </ul>
-      </div>
-
-      <div class="arch-card">
-        <h3><span>🛡️</span> Failure Resilience Matrix</h3>
-        <ul>
-          <li><strong>LLM Provider Down:</strong> Automatically falls back to deterministic heuristic rules (0-100).</li>
-          <li><strong>WhatsApp API Quota/Outage:</strong> Logged as operational failure; Telegram continues uninterrupted.</li>
-          <li><strong>Duplicate Submission:</strong> Caught at database layer; n8n translates to clean 409 Conflict.</li>
-          <li><strong>Schema Violation:</strong> Pydantic rejects invalid types with detailed 422 Unprocessable Entity.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- Footer -->
-<footer>
-  <div class="container footer-inner">
-    <div class="footer-brand">
-      <strong>Lead Intelligence Automation</strong> &mdash; Production-grade inbound lead qualification and routing.
-    </div>
-    <div class="footer-tech">
-      <span class="tech-pill">FastAPI</span>
-      <span class="tech-pill">Python 3.12</span>
-      <span class="tech-pill">PostgreSQL 16</span>
-      <span class="tech-pill">n8n</span>
-      <span class="tech-pill">Caddy 2</span>
-      <span class="tech-pill">WhatsApp Cloud API</span>
-      <span class="tech-pill">Telegram Bot API</span>
     </div>
   </div>
 </footer>
@@ -1111,26 +2072,16 @@
 <script src="config.js"></script>
 <script>
 /* =====================================================================
- * Demo lead form — configuration & runtime logic
+ * Demo lead form — configuration, telemetry, & interaction logic
  * =====================================================================
- * The n8n production webhook URL is configured in exactly ONE place:
- * config.js (window.LEAD_FORM_CONFIG.webhookUrl). This script only reads
- * it; nothing here hardcodes a URL. Deployments render that file
- * (deploy/bin/render-form.sh / DEMO_N8N_WEBHOOK_URL).
- *
- * Flow:  Browser -> n8n webhook (POST /webhook/lead-intake)
- *             -> FastAPI /leads -> PostgreSQL + scoring
- *             -> qualification -> audit -> Telegram & WhatsApp
- *
- * Developer duplicate testing: open the page with ?external_id=<id> to
- * pin the client-generated external_id, e.g. ?external_id=demo-dup-1.
+ * Webhook URL loaded from config.js (window.LEAD_FORM_CONFIG.webhookUrl).
+ * Developer duplicate testing: ?external_id=<id>
  * ===================================================================== */
 const CONFIG = {
   webhookUrl: (window.LEAD_FORM_CONFIG || {}).webhookUrl || "",
   source: "website-contact-form",
 };
 
-/* Optional developer pin for duplicate demonstrations */
 const DEV_EXTERNAL_ID = new URLSearchParams(window.location.search).get("external_id");
 
 const form = document.getElementById("lead-form");
@@ -1139,8 +2090,95 @@ const submitBtn = document.getElementById("submit-btn");
 const submitLabel = document.getElementById("submit-label");
 const payloadPreview = document.getElementById("payload-preview");
 const externalIdBadge = document.getElementById("external-id-badge");
+const statusBlockDesc = document.getElementById("status-block-desc");
+const statusStateLabel = document.getElementById("status-state-label");
+const statusDetails = document.getElementById("status-details");
+const detailsToggle = document.getElementById("details-toggle");
 
-/* Visible misconfiguration banner if config.js missing */
+const destManual = document.getElementById("dest-manual");
+const destUnqualified = document.getElementById("dest-unqualified");
+const destQualified = document.getElementById("dest-qualified");
+
+const mobileMenuBtn = document.getElementById("mobile-menu-btn");
+const mobileDrawer = document.getElementById("mobile-drawer");
+const readingProgressBar = document.getElementById("reading-progress");
+
+/* Reading Progress Bar Scroll Handler */
+function updateReadingProgress() {
+  const scrollTop = window.scrollY || document.documentElement.scrollTop;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  if (docHeight > 0 && readingProgressBar) {
+    const progress = Math.min(Math.max(scrollTop / docHeight, 0), 1);
+    readingProgressBar.style.transform = `scaleX(${progress})`;
+  }
+}
+window.addEventListener("scroll", updateReadingProgress, { passive: true });
+
+/* Mobile Drawer Menu Toggle */
+if (mobileMenuBtn && mobileDrawer) {
+  mobileMenuBtn.addEventListener("click", function() {
+    const isExpanded = mobileMenuBtn.getAttribute("aria-expanded") === "true";
+    mobileMenuBtn.setAttribute("aria-expanded", !isExpanded);
+    mobileDrawer.classList.toggle("open", !isExpanded);
+  });
+
+  // Close drawer when any link clicked
+  mobileDrawer.querySelectorAll("a").forEach(function(link) {
+    link.addEventListener("click", function() {
+      mobileMenuBtn.setAttribute("aria-expanded", "false");
+      mobileDrawer.classList.remove("open");
+    });
+  });
+
+  // Close drawer on Escape key
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape" && mobileDrawer.classList.contains("open")) {
+      mobileMenuBtn.setAttribute("aria-expanded", "false");
+      mobileDrawer.classList.remove("open");
+      mobileMenuBtn.focus();
+    }
+  });
+}
+
+/* ScrollSpy for Active Section Navigation */
+const sections = document.querySelectorAll("main > section[id]");
+const navLinks = document.querySelectorAll(".desktop-nav .nav-link, .mobile-nav-link");
+
+if ("IntersectionObserver" in window && sections.length > 0) {
+  const observerOptions = {
+    root: null,
+    rootMargin: "-20% 0px -60% 0px",
+    threshold: 0
+  };
+
+  const sectionObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        const id = entry.target.getAttribute("id");
+        navLinks.forEach(function(link) {
+          if (link.getAttribute("data-section") === id) {
+            link.classList.add("active");
+          } else {
+            link.classList.remove("active");
+          }
+        });
+      }
+    });
+  }, observerOptions);
+
+  sections.forEach(function(s) { sectionObserver.observe(s); });
+}
+
+/* Details Toggle for Telemetry JSON */
+if (detailsToggle && statusDetails) {
+  detailsToggle.addEventListener("click", function() {
+    const isOpen = statusDetails.style.display === "block";
+    statusDetails.style.display = isOpen ? "none" : "block";
+    detailsToggle.textContent = isOpen ? "View payload telemetry \u2193" : "Hide payload telemetry \u2191";
+  });
+}
+
+/* Missing Webhook Config Warning Banner */
 if (!CONFIG.webhookUrl) {
   const configBanner = document.getElementById("config-banner");
   configBanner.textContent =
@@ -1162,15 +2200,15 @@ function mintExternalId() {
 }
 
 function updateTelemetryPreview() {
-  if (!payloadPreview) return;
   const extId = currentExternalId || DEV_EXTERNAL_ID || "demo-" + (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID().slice(0, 8) : "live");
   if (externalIdBadge) {
-    externalIdBadge.textContent = "ID: " + extId.slice(0, 16) + "...";
+    externalIdBadge.textContent = "ID: " + extId.slice(0, 14) + "...";
   }
+  if (!payloadPreview) return;
   const preview = {
-    name: (document.getElementById("name").value || "Ada Lovelace").trim(),
-    email: (document.getElementById("email").value || "ada@company.com").trim(),
-    company: (document.getElementById("company").value || "Analytical Engines Ltd").trim(),
+    name: (document.getElementById("name").value || "Alex Morgan").trim(),
+    email: (document.getElementById("email").value || "alex@company.com").trim(),
+    company: (document.getElementById("company").value || "Northline").trim(),
     message: (document.getElementById("message").value || "Exploring automated qualification for enterprise inbound.").trim(),
     source: CONFIG.source,
     external_id: extId
@@ -1178,10 +2216,32 @@ function updateTelemetryPreview() {
   payloadPreview.textContent = JSON.stringify(preview, null, 2);
 }
 
+/* Interactive coupling between form fields and processing rail steps */
+function highlightRailStep(stepNumber) {
+  for (let i = 1; i <= 4; i++) {
+    const stepEl = document.getElementById("rail-step-" + i);
+    if (stepEl) {
+      if (i === stepNumber) {
+        stepEl.classList.add("active");
+      } else {
+        stepEl.classList.remove("active");
+      }
+    }
+  }
+}
+
 FIELDS.forEach(function(f) {
   const el = document.getElementById(f);
   if (el) {
-    el.addEventListener("input", updateTelemetryPreview);
+    el.addEventListener("input", function() {
+      updateTelemetryPreview();
+      const step = parseInt(el.getAttribute("data-rail-step"), 10) || 1;
+      highlightRailStep(step);
+    });
+    el.addEventListener("focus", function() {
+      const step = parseInt(el.getAttribute("data-rail-step"), 10) || 1;
+      highlightRailStep(step);
+    });
   }
 });
 updateTelemetryPreview();
@@ -1195,18 +2255,16 @@ function setFieldError(fieldName, message) {
     wrap.classList.add("invalid");
     input.setAttribute("aria-invalid", "true");
     errorEl.textContent = message;
-    errorEl.hidden = false;
   } else {
     wrap.classList.remove("invalid");
     input.removeAttribute("aria-invalid");
     errorEl.textContent = "";
-    errorEl.hidden = true;
   }
 }
 
 function clearAllErrors() {
   banner.textContent = "";
-  banner.classList.remove("error", "duplicate");
+  banner.className = "form-banner";
   FIELDS.forEach(function(f) { setFieldError(f, null); });
 }
 
@@ -1243,13 +2301,70 @@ function renderValidationErrors(detail) {
       }
     });
   }
-  if (!any) banner.textContent = "Please check the highlighted fields and try again.";
-  banner.classList.add("error");
+  banner.textContent = any ? "Please check the highlighted fields and try again." : "Validation failed. Please verify your enquiry.";
+  banner.className = "form-banner error";
+}
+
+function resetRailHighlights() {
+  [destManual, destUnqualified, destQualified].forEach(function(el) {
+    if (el) el.classList.remove("selected");
+  });
+  for (let i = 1; i <= 4; i++) {
+    const stepEl = document.getElementById("rail-step-" + i);
+    if (stepEl) stepEl.classList.remove("active");
+  }
+  statusStateLabel.textContent = "Awaiting submission";
+  statusStateLabel.className = "status-state-tag";
+  statusBlockDesc.textContent = "No result yet. When you submit a test lead, the pipeline records the enquiry, executes qualification scoring, and surfaces the routed outcome.";
+  if (statusDetails) statusDetails.style.display = "none";
+}
+
+function highlightOutcome(outcome, leadData) {
+  resetRailHighlights();
+  if (statusDetails) statusDetails.style.display = "block";
+
+  if (outcome === "created") {
+    const score = leadData && leadData.lead && leadData.lead.score !== null ? leadData.lead.score : null;
+    let destLabel = "Processed";
+    if (score !== null) {
+      if (score >= 70) {
+        destQualified.classList.add("selected");
+        destLabel = "Qualified (Score " + score + "/100)";
+      } else if (score < 40) {
+        destUnqualified.classList.add("selected");
+        destLabel = "Not qualified (Score " + score + "/100)";
+      } else {
+        destManual.classList.add("selected");
+        destLabel = "Manual review (Score " + score + "/100)";
+      }
+    } else {
+      destManual.classList.add("selected");
+      destLabel = "Persisted & Queued";
+    }
+
+    statusStateLabel.textContent = "Created: " + destLabel;
+    statusStateLabel.className = "status-state-tag created";
+    statusBlockDesc.textContent = "Lead intake successful. Persisted to PostgreSQL, scored, and routed through configured notification channels.";
+    if (payloadPreview) {
+      payloadPreview.textContent = JSON.stringify(leadData, null, 2);
+    }
+  } else if (outcome === "duplicate") {
+    statusStateLabel.textContent = "Duplicate Rejected (409)";
+    statusStateLabel.className = "status-state-tag duplicate";
+    statusBlockDesc.textContent = "Duplicate external ID detected. The system preserved the existing record and rejected redundant re-ingestion.";
+    if (payloadPreview && leadData) {
+      payloadPreview.textContent = JSON.stringify(leadData, null, 2);
+    }
+  } else {
+    statusStateLabel.textContent = "Error: " + outcome;
+    statusStateLabel.className = "status-state-tag error";
+    statusBlockDesc.textContent = "The pipeline returned an unexpected status code. Check network connection or webhook URL.";
+  }
 }
 
 function showPanel(panel) {
-  form.hidden = true;
-  panel.hidden = false;
+  form.style.display = "none";
+  panel.classList.add("visible");
   panel.focus();
 }
 
@@ -1257,16 +2372,17 @@ function resetToForm() {
   clearAllErrors();
   form.reset();
   currentExternalId = null;
-  document.querySelectorAll(".outcome").forEach(function(p) { p.hidden = true; });
-  form.hidden = false;
+  document.querySelectorAll(".outcome-panel").forEach(function(p) { p.classList.remove("visible"); });
+  form.style.display = "block";
+  resetRailHighlights();
   updateTelemetryPreview();
   document.getElementById("name").focus();
 }
 
 function setSubmitting(isSubmitting) {
   submitBtn.disabled = isSubmitting;
-  form.classList.toggle("submitting", isSubmitting);
-  submitLabel.textContent = isSubmitting ? "Submitting\u2026" : "Submit Inbound Lead";
+  submitBtn.classList.toggle("submitting", isSubmitting);
+  submitLabel.textContent = isSubmitting ? "Submitting\u2026" : "Submit test lead";
 }
 
 async function handleSubmit(event) {
@@ -1296,7 +2412,8 @@ async function handleSubmit(event) {
     setSubmitting(false);
     console.warn("[lead-form] network error reaching webhook:", err);
     banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
-    banner.classList.add("error");
+    banner.className = "form-banner error";
+    highlightOutcome("Network failure", null);
     return;
   }
 
@@ -1306,21 +2423,25 @@ async function handleSubmit(event) {
   console.log("[lead-form] response:", res.status, data && data.outcome);
 
   if (res.ok && data && data.outcome === "created") {
+    highlightOutcome("created", data);
     currentExternalId = null;
     showPanel(document.getElementById("success-panel"));
   } else if (res.status === 409 || (data && data.outcome === "duplicate")) {
+    highlightOutcome("duplicate", data);
     currentExternalId = null;
     showPanel(document.getElementById("duplicate-panel"));
   } else if (res.status === 422 || (data && data.outcome === "validation_failed")) {
     renderValidationErrors(data && data.detail);
     document.getElementById("name").focus();
   } else if (res.status === 502 || (data && data.outcome === "upstream_error")) {
-    banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
-    banner.classList.add("error");
+    banner.textContent = "Upstream service error. Please try again shortly.";
+    banner.className = "form-banner error";
+    highlightOutcome("Upstream 502", data);
   } else {
     console.warn("[lead-form] unexpected response:", res.status, data);
     banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
-    banner.classList.add("error");
+    banner.className = "form-banner error";
+    highlightOutcome("HTTP " + res.status, data);
   }
 }
 

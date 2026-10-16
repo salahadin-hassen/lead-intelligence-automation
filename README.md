@@ -138,7 +138,7 @@ cp .env.example .env
 ### 3. Run Automated Tests
 ```bash
 .venv/bin/python -m pytest -q
-# Expected result: 97 passed
+# Expected result: 103 passed
 ```
 
 ### 4. Run the API Locally
@@ -152,6 +152,7 @@ cp .env.example .env
 
 ## Documentation Quick Links
 
+- [**Production Deployment Guide**](docs/production-deployment.md) — One-click zero-cost deployment on Render Blueprints with Neon Serverless PostgreSQL.
 - [**Technical Case Study**](docs/case-study.md) — In-depth architectural decisions, trade-offs, and 3 verified engineering incident resolutions.
 - [**3-Minute Demo Walkthrough**](docs/demo-walkthrough.md) — Screen recording script demonstrating lead intake, persistence, and reliability.
 - [**WhatsApp Setup & Integration Guide**](docs/whatsapp-setup.md) — Meta Cloud API configuration, template schemas, credential setup, and failure isolation.

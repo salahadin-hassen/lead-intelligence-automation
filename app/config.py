@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_base_url: str | None = None
     llm_model: str = "openrouter/free"
+    app_env: str = "development"
+    render: bool = False
+    api_auth_token: str | None = None
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.lower() in ("production", "prod") or self.render
 
 
 @lru_cache
