@@ -120,8 +120,8 @@ def init_schema() -> None:
 
 
 # /health must answer promptly even when the pool is saturated: the pool's
-# default wait is 30 s, far too long for a probe.
-HEALTH_PING_TIMEOUT_SECONDS = 2.0
+# default wait is 30 s. Set to 5.0s to allow for serverless cold-start wakeups.
+HEALTH_PING_TIMEOUT_SECONDS = 5.0
 
 
 def ping() -> None:

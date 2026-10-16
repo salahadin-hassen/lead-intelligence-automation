@@ -1,0 +1,13 @@
+{
+  "name": "lead-intelligence-automation",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "./deploy/bin/render-form.sh",
+    "start": ".venv/bin/uvicorn app.main:app --port 8000",
+    "test": ".venv/bin/python -m pytest -q"
+  },
+  "dependencies": {
+    "@neon/config": "^1.9.2",
+    "@neon/env": "^1.6.3"
+  }
+}
