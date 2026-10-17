@@ -87,3 +87,17 @@ def test_render_yaml_production_config():
                     f"Service {s['name']} uses unsupported private network property 'hostport' on free tier"
                 )
 
+
+def test_caddy_dockerfile_strips_file_capabilities():
+    """Ensure deploy/docker/Dockerfile.caddy strips CAP_NET_BIND_SERVICE for Render compatibility."""
+    dockerfile_path = REPO_ROOT / "deploy" / "docker" / "Dockerfile.caddy"
+    assert dockerfile_path.exists(), "Dockerfile.caddy must exist"
+
+    content = dockerfile_path.read_text(encoding="utf-8")
+    assert "setcap -r /usr/bin/caddy" in content, "Dockerfile.caddy must remove file capabilities from caddy"
+    assert "test -z \"$(getcap /usr/bin/caddy)\"" in content, "Dockerfile.caddy must verify capabilities are removed"
+    assert "ENV PORT=10000" in content, "Dockerfile.caddy must set PORT=10000"
+    assert "COPY deploy/caddy/Caddyfile.render /etc/caddy/Caddyfile" in content, "Caddyfile must be copied"
+    assert "webhookUrl: \"/webhook/lead-intake\"" in content, "Must retain same-origin webhook URL in config.js"
+
+
