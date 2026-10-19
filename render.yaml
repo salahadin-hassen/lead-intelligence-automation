@@ -71,6 +71,8 @@ services:
         value: "5679"
       - key: N8N_DIAGNOSTICS_ENABLED
         value: "false"
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=320"
       - key: LEAD_API_BASE_URL
         sync: false # Set to https://<leadintel-api>.onrender.com
       - key: LEAD_QUALIFIED_THRESHOLD

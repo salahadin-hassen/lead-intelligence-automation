@@ -4,6 +4,7 @@ set -e
 # Render and generic PaaS port mapping
 export N8N_PORT="${PORT:-5678}"
 export N8N_LISTEN_ADDRESS="0.0.0.0"
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=320}"
 
 # Parse unified DATABASE_URL or N8N_DATABASE_URL if discrete DB_POSTGRESDB_* vars are not set
 if [ -z "$DB_POSTGRESDB_HOST" ] && { [ -n "$N8N_DATABASE_URL" ] || [ -n "$DATABASE_URL" ]; }; then
