@@ -1,13 +1,17 @@
 /**
- * Cloudflare Pages Function: Webhook Intake Proxy
+ * Cloudflare Pages Function & Worker: Webhook Intake Proxy
  *
  * Route: POST /webhook/lead-intake
  *
  * Narrowly scoped proxy that forwards inbound lead form submissions to the
  * verified Render ingress endpoint (https://leadintel-caddy.onrender.com/webhook/lead-intake).
  *
+ * Compatible with:
+ * - Cloudflare Pages Functions (invoked via `export async function onRequest`)
+ * - Cloudflare Workers with Assets (invoked via `export default { fetch }` from wrangler.json)
+ *
  * Guarantees:
- * - Restricts requests to this exact upstream endpoint.
+ * - Restricts requests strictly to this exact upstream endpoint.
  * - Accepts only HTTP POST; rejects unsupported methods with HTTP 405.
  * - Preserves upstream HTTP status codes (e.g., 201 Created, 409 Conflict, 422 Unprocessable).
  * - Returns a sanitized HTTP 502 response on upstream network failure.
@@ -16,9 +20,7 @@
 
 const UPSTREAM_WEBHOOK_URL = "https://leadintel-caddy.onrender.com/webhook/lead-intake";
 
-export async function onRequest(context) {
-  const { request } = context;
-
+async function handleWebhookProxy(request) {
   // 1. Restrict methods: Only POST is accepted
   if (request.method !== "POST") {
     return new Response(
@@ -101,3 +103,23 @@ export async function onRequest(context) {
     );
   }
 }
+
+// 1. Cloudflare Pages Functions interface
+export async function onRequest(context) {
+  return handleWebhookProxy(context.request);
+}
+
+// 2. Cloudflare Workers interface (for wrangler deploy / Workers Builds)
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === "/webhook/lead-intake" || url.pathname === "/webhook/lead-intake/") {
+      return handleWebhookProxy(request);
+    }
+    // Fall back to static assets if env.ASSETS is bound
+    if (env && env.ASSETS && typeof env.ASSETS.fetch === "function") {
+      return env.ASSETS.fetch(request);
+    }
+    return new Response("Not Found", { status: 404 });
+  },
+};
