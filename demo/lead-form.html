@@ -3,51 +3,205 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LeadIntel — Inbound Lead Intelligence &amp; Autonomous Qualification</title>
-<meta name="description" content="Validate enquiries, identify duplicates, prioritize leads, and route the next action through one traceable, fault-tolerant workflow.">
+<title>LeadIntel — Inbound Lead Intake &amp; Qualification Pipeline</title>
+<meta name="description" content="Traceable inbound lead intake engine: validate submissions, eliminate duplicates, score buyer intent, and route qualified prospects through n8n.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Crect x='2' y='2' width='8' height='8' rx='2' fill='%233B82F6'/%3E%3Crect x='14' y='2' width='8' height='8' rx='2' fill='%23FFFFFF'/%3E%3Crect x='14' y='14' width='8' height='8' rx='2' fill='%2322C55E'/%3E%3C/svg%3E">
+<script>
+  /* Early route and theme initialization to prevent flash: default is dark, default view is landing */
+  (function() {
+    try {
+      /* Prevent browser scroll restoration from restoring prior bottom/last-section scroll position on load/reload */
+      if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'manual';
+      }
+
+      var params = new URLSearchParams(window.location.search);
+      var q = params.get("theme");
+      if (q === "light" || q === "dark") {
+        document.documentElement.setAttribute("data-theme", q);
+      } else {
+        var t = localStorage.getItem("leadintel-theme");
+        if (t === "light") {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      }
+
+      var isClean = window.location.protocol !== "file:" && window.location.port !== "5500";
+      var cleanPath = window.location.pathname.replace(/\/$/, "");
+      var isDemo = false;
+      if (params.get("view") === "demo" || window.location.hash === "#demo") {
+        isDemo = true;
+      } else if (isClean && cleanPath === "/demo") {
+        isDemo = true;
+      }
+
+      if (isDemo) {
+        document.documentElement.setAttribute("data-view", "demo");
+      } else {
+        document.documentElement.setAttribute("data-view", "landing");
+        if (!window.location.hash || window.location.hash === "#" || window.location.hash === "#hero") {
+          window.scrollTo(0, 0);
+          if (document.documentElement) document.documentElement.scrollTop = 0;
+          if (document.body) document.body.scrollTop = 0;
+        }
+      }
+    } catch (e) {}
+  })();
+</script>
 <style>
   :root {
-    --bg-dark: #101C24;
-    --bg-dark-card: #192A33;
-    --bg-dark-card-hover: #1f333e;
-    --bg-cream: #F3F0E8;
-    --bg-sage: #EAEDE7;
-    --bg-white: #FFFFFF;
+    /* Flat dark palette per B4 (DEFAULT) */
+    --bg-base: #000000;
+    --bg-surface-1: #181818;
+    --bg-surface-2: #1F1F1F;
+    --bg-surface-3: #272727;
+    --bg-surface-4: #313131;
 
-    --text-on-dark: #F3F0E8;
-    --text-on-dark-muted: #BAC5C5;
-    --text-primary: #101C24;
-    --text-muted: #596675;
-    --text-dim: #7B8B9A;
+    /* Crisp borders: all continuous perimeter, never single-sided */
+    --border-subtle: #272727;
+    --border-default: #313131;
+    --border-highlight: rgba(255, 255, 255, 0.16);
+    --border-active: rgba(255, 255, 255, 0.32);
 
-    --border-dark: #253844;
-    --border-dark-strong: #2D3E47;
-    --border-light: #E0E3DC;
-    --border-light-subtle: #ECEFE8;
+    /* Text contrast */
+    --text-primary: #FFFFFF;
+    --text-muted: #9B9B9B;
+    --text-dim: #666666;
 
-    --blue-primary: #315FEA;
-    --blue-primary-hover: #264ec4;
-    --blue-mark: #9DB2FF;
-    --accent-lime: #D4F36B;
-    --accent-lime-dark: #526A14;
-    --accent-orange: #C25B1D;
-    --accent-red: #D9383A;
-    --accent-green: #1B7A43;
+    /* Interactive tokens */
+    --focus-ring: #FFFFFF;
+    --brand-cube-color: #FFFFFF;
+    --progress-bar-color: #FFFFFF;
 
-    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    /* Primary button */
+    --btn-primary-bg: #FFFFFF;
+    --btn-primary-text: #000000;
+    --btn-primary-hover: #E5E5E5;
 
+    /* Hero gradient strictly text per B5 */
+    --hero-gradient: linear-gradient(90deg, #FFFFFF 0%, #9B9B9B 100%);
+    --reveal-word-muted: rgba(255, 255, 255, 0.28);
+    --reveal-word-active: #FFFFFF;
+
+    /* Island Nav */
+    --nav-bg: rgba(24, 24, 24, 0.85);
+    --nav-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+    /* Form & Rail active states */
+    --input-bg: var(--bg-surface-2);
+    --input-border: var(--border-default);
+    --input-focus-border: #FFFFFF;
+    --input-focus-bg: var(--bg-surface-3);
+
+    --rail-step-bg: var(--bg-surface-2);
+    --rail-active-bg: var(--bg-surface-3);
+    --rail-active-border: #FFFFFF;
+
+    --chip-bg: var(--bg-surface-3);
+    --chip-border: var(--border-default);
+    --chip-text: var(--text-muted);
+    --chip-active-bg: var(--bg-surface-4);
+    --chip-active-text: #FFFFFF;
+    --chip-active-border: #FFFFFF;
+
+    --card-shadow: none;
+
+    /* Functional accents */
+    --accent-blue: #3B82F6;
+    --accent-blue-bg: rgba(59, 130, 246, 0.12);
+    --accent-green: #22C55E;
+    --accent-green-bg: rgba(34, 197, 94, 0.12);
+    --accent-orange: #F97316;
+    --accent-orange-bg: rgba(249, 115, 22, 0.12);
+    --accent-red: #EF4444;
+    --accent-red-bg: rgba(239, 68, 68, 0.12);
+
+    /* Typography: Single sans family + monospace */
+    --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* Radius scale per B3 */
     --radius-sm: 4px;
-    --radius-md: 6px;
+    --radius-md: 8px;
     --radius-lg: 12px;
     --radius-xl: 16px;
-    --radius-2xl: 20px;
+    --radius-full: 9999px;
 
-    --header-h: 72px;
-    --content-max-w: 1280px;
+    /* Motion per B7 */
+    --ease-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+    --duration-fluid: 700ms;
+    --transition-fluid: all var(--duration-fluid) var(--ease-fluid);
+
+    /* Content sizing */
+    --content-max-w: 1200px;
+  }
+
+  /* =====================================================================
+   * Light Theme Option (Selected via toggle; default is dark)
+   * Strictly follows B4 flat surfaces & B5 light heading gradient #000000 -> #666666
+   * Enhanced with high-contrast typography, crisp borders, and refined feedback
+   * ===================================================================== */
+  [data-theme="light"] {
+    --bg-base: #FAFAFA;
+    --bg-surface-1: #FFFFFF;
+    --bg-surface-2: #F4F4F5;
+    --bg-surface-3: #E4E4E7;
+    --bg-surface-4: #D4D4D8;
+
+    --border-subtle: #E4E4E7;
+    --border-default: #E4E4E7;
+    --border-highlight: #A1A1AA;
+    --border-active: #09090B;
+
+    --text-primary: #09090B;
+    --text-muted: #52525B;
+    --text-dim: #71717A;
+
+    --focus-ring: #09090B;
+    --brand-cube-color: #09090B;
+    --progress-bar-color: #09090B;
+
+    --btn-primary-bg: #09090B;
+    --btn-primary-text: #FFFFFF;
+    --btn-primary-hover: #27272A;
+
+    --hero-gradient: linear-gradient(90deg, #000000 0%, #666666 100%);
+    --reveal-word-muted: rgba(0, 0, 0, 0.28);
+    --reveal-word-active: #09090B;
+
+    --nav-bg: rgba(255, 255, 255, 0.88);
+    --nav-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.08);
+
+    --input-bg: #FFFFFF;
+    --input-border: #E4E4E7;
+    --input-focus-border: #09090B;
+    --input-focus-bg: #FFFFFF;
+
+    --rail-step-bg: #FAFAFA;
+    --rail-active-bg: #FFFFFF;
+    --rail-active-border: #09090B;
+
+    --chip-bg: #FFFFFF;
+    --chip-border: #E4E4E7;
+    --chip-text: #52525B;
+    --chip-active-bg: #09090B;
+    --chip-active-text: #FFFFFF;
+    --chip-active-border: #09090B;
+
+    --card-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
+
+    /* WCAG AA / AAA high-contrast accents on light backgrounds */
+    --accent-blue: #2563EB;
+    --accent-blue-bg: rgba(37, 99, 235, 0.08);
+    --accent-green: #15803D;
+    --accent-green-bg: rgba(21, 128, 61, 0.1);
+    --accent-orange: #C2410C;
+    --accent-orange-bg: rgba(194, 65, 12, 0.1);
+    --accent-red: #DC2626;
+    --accent-red-bg: rgba(220, 38, 38, 0.1);
   }
 
   *, *::before, *::after {
@@ -59,33 +213,36 @@
   html {
     scroll-behavior: smooth;
     font-size: 16px;
+    background-color: var(--bg-base);
+    color: var(--text-primary);
     -webkit-text-size-adjust: 100%;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    html {
-      scroll-behavior: auto;
-    }
-    *, *::before, *::after {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
-    }
+    transition: background-color 300ms ease, color 300ms ease;
   }
 
   body {
-    background-color: var(--bg-cream);
+    background-color: var(--bg-base);
     color: var(--text-primary);
     font-family: var(--font-sans);
-    line-height: 1.5;
+    line-height: 24px;
+    font-size: 16px;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
     position: relative;
+    text-wrap: pretty;
+    transition: background-color 300ms ease, color 300ms ease;
+  }
+
+  /* Accessibility focus ring per B9 */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
   }
 
   a {
     color: inherit;
     text-decoration: none;
+    transition: color 200ms var(--ease-fluid);
   }
 
   button {
@@ -95,119 +252,281 @@
     background: none;
   }
 
-  /* Reading Progress Bar */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .skip-link {
+    position: absolute;
+    top: -60px;
+    left: 24px;
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    z-index: 9999;
+    transition: top 200ms ease;
+  }
+
+  .skip-link:focus {
+    top: 16px;
+  }
+
+  /* Reading progress bar */
   .reading-progress-bar {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
-    height: 3px;
-    background: var(--blue-primary);
+    height: 2px;
+    background: var(--progress-bar-color);
     transform-origin: 0 50%;
     transform: scaleX(0);
-    z-index: 1001;
-    transition: transform 0.08s linear;
+    z-index: 1002;
+    transition: transform 120ms linear;
   }
 
-  /* Consistent Fluid Container */
   .container {
     width: 100%;
     max-width: var(--content-max-w);
     margin: 0 auto;
-    padding-left: clamp(20px, 4vw, 64px);
-    padding-right: clamp(20px, 4vw, 64px);
+    padding-left: clamp(16px, 4vw, 40px);
+    padding-right: clamp(16px, 4vw, 40px);
   }
 
-  /* Section Chapters & Punctuation */
-  .section-chapter-tag {
+  /* Typography helpers per B1 */
+  h1, h2, h3, h4 {
+    text-wrap: balance;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+
+  /* Buttons per B1 & B2 */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--btn-primary-bg);
+    transition: var(--transition-fluid);
+    white-space: nowrap;
+  }
+
+  .btn-primary:hover {
+    background: var(--btn-primary-hover);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active {
+    transform: scale(0.98);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-default);
+    transition: var(--transition-fluid);
+    white-space: nowrap;
+  }
+
+  .btn-secondary:hover {
+    background: var(--bg-surface-3);
+    border-color: var(--border-highlight);
+  }
+
+  .btn-secondary:active {
+    transform: scale(0.98);
+  }
+
+  .btn-header {
+    font-size: 14px;
+    line-height: 20px;
+    padding: 6px 14px;
+  }
+
+  /* =====================================================================
+   * Hero Eyebrow & Technical Section Kickers (Executive UI/UX)
+   * Replaced generic vibecode dots with structured architectural tags
+   * ===================================================================== */
+  .hero-badge {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-full);
+    padding: 3px 12px 3px 4px;
+    margin-bottom: 24px;
+    box-shadow: var(--card-shadow);
+    width: fit-content;
+    text-decoration: none;
+    transition: var(--transition-fluid);
+  }
+
+  .hero-badge:hover {
+    border-color: var(--border-highlight);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+  }
+
+  .hero-badge-tag {
+    font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    margin-bottom: 20px;
+    padding: 2px 7px;
+    border-radius: var(--radius-full);
+    background: var(--bg-surface-3);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
   }
 
-  .section-chapter-tag.dark {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-on-dark-muted);
-    border: 1px solid var(--border-dark-strong);
+  .hero-badge-divider {
+    width: 1px;
+    height: 12px;
+    background: var(--border-default);
   }
 
-  .section-chapter-tag.light {
-    background: rgba(16, 28, 36, 0.05);
+  .hero-badge-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: -0.01em;
+  }
+
+  .hero-badge-arrow {
+    font-size: 11px;
+    color: var(--text-dim);
+    transition: transform 200ms ease;
+  }
+
+  .hero-badge:hover .hero-badge-arrow {
+    transform: translateX(2px);
+    color: var(--text-primary);
+  }
+
+  /* Technical Section Kickers */
+  .section-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     color: var(--text-muted);
-    border: 1px solid var(--border-light);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+    margin-bottom: 20px;
+    box-shadow: var(--card-shadow);
+    width: fit-content;
   }
 
-  .section-chapter-tag .tag-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--blue-primary);
+  .section-tag-index {
+    color: var(--text-primary);
+    font-weight: 600;
   }
 
-  .section-divider-rule {
-    width: 100%;
-    height: 1px;
-    background: var(--border-light);
-    margin-bottom: 40px;
+  .section-tag-sep {
+    color: var(--border-highlight);
+    opacity: 0.5;
   }
 
-  .section-divider-rule.dark {
-    background: var(--border-dark);
-  }
-
-  /* Sticky Header */
-  .site-header {
-    background: rgba(16, 28, 36, 0.95);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+  /* =====================================================================
+   * Fluid Island Nav (B7)
+   * ===================================================================== */
+  .header-wrapper {
     position: sticky;
     top: 0;
     z-index: 1000;
-    border-bottom: 1px solid var(--border-dark);
-    transition: background 0.2s ease;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    pointer-events: none;
   }
 
-  .nav-inner {
+  .island-nav {
+    pointer-events: auto;
+    margin: 0 auto;
+    width: max-content;
+    max-width: calc(100% - 32px);
+    background: var(--nav-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-full);
+    padding: 6px 8px 6px 16px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    height: var(--header-h);
+    gap: 20px;
+    box-shadow: var(--nav-shadow);
+    transition: var(--transition-fluid);
   }
 
   .brand-identity {
     display: flex;
     align-items: center;
-    gap: 12px;
-    color: var(--text-on-dark);
-    text-decoration: none;
-    z-index: 1002;
+    gap: 10px;
+    color: var(--text-primary);
   }
 
   .brand-logo-svg {
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
     flex-shrink: 0;
   }
 
   .brand-wordmark {
-    font-size: 22px;
+    font-size: 16px;
+    line-height: 24px;
     font-weight: 600;
     letter-spacing: -0.02em;
-    color: var(--text-on-dark);
   }
 
   .desktop-nav {
     display: none;
     align-items: center;
-    gap: 28px;
+    gap: 20px;
   }
 
   @media (min-width: 860px) {
@@ -218,85 +537,81 @@
 
   .nav-link {
     font-size: 14px;
+    line-height: 20px;
     font-weight: 500;
-    color: var(--text-on-dark-muted);
-    transition: color 0.15s ease;
-    position: relative;
-    padding: 6px 0;
+    color: var(--text-muted);
+    padding: 4px 6px;
+    transition: color 150ms ease;
   }
 
-  .nav-link:hover {
-    color: var(--text-on-dark);
-  }
-
-  .nav-link.active {
-    color: var(--text-on-dark);
-    font-weight: 600;
-  }
-
-  .nav-link.active::after {
-    content: "";
-    position: absolute;
-    bottom: -2px;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--blue-primary);
-    border-radius: 2px;
+  .nav-link:hover, .nav-link.active {
+    color: var(--text-primary);
   }
 
   .nav-cta-wrap {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 8px;
   }
 
-  .btn-primary {
-    background: var(--blue-primary);
-    color: #FFFFFF;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 10px 18px;
-    border-radius: var(--radius-md);
-    transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  /* Theme toggle button */
+  .theme-toggle-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    text-decoration: none;
-    line-height: 1;
-    white-space: nowrap;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-default);
+    color: var(--text-muted);
+    transition: var(--transition-fluid);
+    flex-shrink: 0;
   }
 
-  .btn-primary:hover {
-    background: var(--blue-primary-hover);
-    box-shadow: 0 4px 12px rgba(49, 95, 234, 0.25);
+  .theme-toggle-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--border-highlight);
+    background: var(--bg-surface-3);
   }
 
-  .btn-primary:active {
-    transform: translateY(1px);
+  .theme-toggle-btn:active {
+    transform: scale(0.95);
   }
 
-  .btn-primary:focus-visible {
-    outline: 2px solid var(--accent-lime);
-    outline-offset: 2px;
+  .theme-icon-sun, .theme-icon-moon {
+    width: 16px;
+    height: 16px;
   }
 
-  /* Mobile Menu Toggle Button */
+  /* In dark mode (default): show sun icon, hide moon icon */
+  .theme-icon-moon {
+    display: none;
+  }
+  .theme-icon-sun {
+    display: block;
+  }
+
+  /* In light mode: show moon icon, hide sun icon */
+  [data-theme="light"] .theme-icon-sun {
+    display: none;
+  }
+  [data-theme="light"] .theme-icon-moon {
+    display: block;
+  }
+
+  /* Mobile menu button and animated hamburger */
   .mobile-menu-btn {
     display: flex;
-    flex-direction: column;
-    justify-content: center;
     align-items: center;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-dark-strong);
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--text-on-dark);
-    padding: 0;
-    z-index: 1002;
-    transition: background 0.15s ease;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-default);
+    color: var(--text-primary);
+    position: relative;
   }
 
   @media (min-width: 860px) {
@@ -305,492 +620,685 @@
     }
   }
 
-  .mobile-menu-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-
   .hamburger-icon {
-    width: 18px;
-    height: 14px;
+    width: 16px;
+    height: 12px;
     position: relative;
+    display: block;
   }
 
   .hamburger-line {
     position: absolute;
+    left: 0;
     width: 100%;
     height: 2px;
-    background: var(--text-on-dark);
+    background: var(--text-primary);
     border-radius: 1px;
-    left: 0;
-    transition: transform 0.2s ease, top 0.2s ease, opacity 0.2s ease;
+    transition: var(--transition-fluid);
   }
 
   .hamburger-line:nth-child(1) { top: 0; }
-  .hamburger-line:nth-child(2) { top: 6px; }
-  .hamburger-line:nth-child(3) { top: 12px; }
+  .hamburger-line:nth-child(2) { top: 5px; }
+  .hamburger-line:nth-child(3) { top: 10px; }
 
+  /* Morph into X when expanded */
   .mobile-menu-btn[aria-expanded="true"] .hamburger-line:nth-child(1) {
-    top: 6px;
-    transform: rotate(45deg);
+    transform: translateY(5px) rotate(45deg);
   }
   .mobile-menu-btn[aria-expanded="true"] .hamburger-line:nth-child(2) {
     opacity: 0;
+    transform: scaleX(0);
   }
   .mobile-menu-btn[aria-expanded="true"] .hamburger-line:nth-child(3) {
-    top: 6px;
-    transform: rotate(-45deg);
+    transform: translateY(-5px) rotate(-45deg);
   }
 
-  /* Mobile Drawer Menu */
+  /* Mobile modal drawer */
   .mobile-drawer {
-    display: none;
     position: fixed;
-    top: var(--header-h);
-    left: 0;
-    right: 0;
-    background: rgba(16, 28, 36, 0.98);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-bottom: 1px solid var(--border-dark);
-    padding: 24px clamp(20px, 4vw, 64px) 32px;
+    top: 80px;
+    left: 16px;
+    right: 16px;
+    background: var(--nav-bg);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    padding: 24px;
+    display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateY(-16px);
+    pointer-events: none;
+    transition: var(--transition-fluid);
     z-index: 999;
+    box-shadow: var(--nav-shadow);
   }
 
   .mobile-drawer.open {
-    display: flex;
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
   }
 
   .mobile-nav-link {
     font-size: 16px;
+    line-height: 24px;
     font-weight: 500;
-    color: var(--text-on-dark-muted);
+    color: var(--text-muted);
     padding: 8px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    transition: color 0.15s ease;
+    border-bottom: 1px solid var(--border-subtle);
   }
 
-  .mobile-nav-link:hover, .mobile-nav-link.active {
-    color: var(--text-on-dark);
-    font-weight: 600;
+  .mobile-nav-link:hover {
+    color: var(--text-primary);
   }
 
-  /* SECTION 0: Hero / Chapter: Signal to Action */
+  /* =====================================================================
+   * Hero Section (B5)
+   * ===================================================================== */
   .hero-section {
-    background: var(--bg-dark);
-    color: var(--text-on-dark);
-    padding-top: clamp(40px, 6vw, 72px);
-    padding-bottom: clamp(56px, 8vw, 96px);
-    position: relative;
-    border-bottom: 1px solid var(--border-dark);
+    padding-top: clamp(48px, 8vw, 80px);
+    padding-bottom: clamp(48px, 8vw, 80px);
+  }
+
+  .hero-content {
+    max-width: 680px;
+    margin: 0 auto;
+    text-align: center;
   }
 
   .hero-headline {
-    font-size: clamp(38px, 6vw, 84px);
-    line-height: 1.08;
-    font-weight: 500;
-    letter-spacing: -0.03em;
-    color: var(--text-on-dark);
-    margin-bottom: clamp(24px, 4vw, 36px);
-    max-width: 1100px;
-  }
-
-  .hero-headline .indent-line {
-    display: block;
-    margin-left: 0;
-  }
-
-  @media (min-width: 1024px) {
-    .hero-headline .indent-line {
-      margin-left: clamp(0px, 8vw, 140px);
-    }
-  }
-
-  .hero-split {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    margin-bottom: clamp(40px, 6vw, 64px);
-  }
-
-  @media (min-width: 860px) {
-    .hero-split {
-      flex-direction: row;
-      justify-content: space-between;
-      align-items: flex-end;
-    }
+    font-size: clamp(32px, 5vw, 48px);
+    line-height: clamp(38px, 5.5vw, 54px);
+    font-weight: 600;
+    margin-bottom: 24px;
+    /* Left to right gradient strictly on hero heading text per B5 */
+    background: var(--hero-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 
   .hero-value-prop {
-    font-size: clamp(15px, 1.8vw, 17px);
-    line-height: 1.6;
-    color: var(--text-on-dark-muted);
-    max-width: 520px;
+    font-size: clamp(16px, 2vw, 18px);
+    line-height: 28px;
+    color: var(--text-muted);
+    margin-bottom: 32px;
   }
 
   .hero-actions {
     display: flex;
     align-items: center;
-    gap: 20px;
+    justify-content: center;
+    gap: 16px;
     flex-wrap: wrap;
+    margin-bottom: 48px;
   }
 
-  .hero-actions .explore-link {
+  .hero-secondary-link {
     font-size: 14px;
+    line-height: 20px;
     font-weight: 500;
-    color: var(--text-on-dark);
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    transition: opacity 0.15s ease;
+    color: var(--text-muted);
+    padding: 8px 12px;
   }
 
-  .hero-actions .explore-link:hover {
-    opacity: 0.8;
+  .hero-secondary-link:hover {
+    color: var(--text-primary);
   }
 
-  /* Hero Circuit Diagram */
-  .hero-circuit-wrap {
-    border-top: 1px solid var(--border-dark);
-    padding-top: clamp(24px, 4vw, 36px);
-  }
-
-  .circuit-grid {
+  /* Hero flow overview */
+  .hero-flow {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 20px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    max-width: 900px;
+    margin: 0 auto;
   }
 
-  @media (min-width: 1024px) {
-    .circuit-grid {
-      grid-template-columns: minmax(260px, 310px) 1.2fr minmax(240px, 290px);
-      gap: 28px;
-      align-items: start;
+  @media (max-width: 720px) {
+    .hero-flow {
+      grid-template-columns: repeat(2, 1fr);
     }
   }
 
-  .circuit-col-title {
-    color: var(--text-on-dark-muted);
-    margin-bottom: 12px;
-    display: block;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .signal-card {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border-dark-strong);
+  .hero-flow-step {
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    padding: 16px;
-    transition: border-color 0.2s ease, transform 0.2s ease;
+    padding: 12px 14px;
+    text-align: left;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-muted);
+    box-shadow: var(--card-shadow);
   }
 
-  .signal-card:hover {
-    border-color: rgba(212, 243, 107, 0.4);
-    transform: translateY(-2px);
-  }
-
-  .signal-badge {
-    color: var(--accent-lime);
-    font-size: 11px;
-    margin-bottom: 8px;
+  .hero-flow-step span {
     display: block;
     font-family: var(--font-mono);
-  }
-
-  .signal-contact {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-on-dark);
-    margin-bottom: 6px;
-  }
-
-  .signal-text {
     font-size: 12px;
-    color: var(--text-on-dark-muted);
-    font-style: italic;
-    line-height: 1.4;
-  }
-
-  .intel-card {
-    background: var(--bg-dark-card);
-    border: 1px solid var(--border-dark-strong);
-    border-radius: var(--radius-md);
-    padding: 16px 20px;
-    margin-bottom: 12px;
-    transition: border-color 0.2s ease, transform 0.2s ease;
-  }
-
-  .intel-card:hover {
-    border-color: rgba(157, 178, 255, 0.5);
-    transform: translateY(-2px);
-  }
-
-  .intel-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-on-dark);
+    line-height: 16px;
+    color: var(--text-dim);
     margin-bottom: 4px;
   }
 
-  .intel-subtitle {
-    font-size: 12px;
-    color: var(--text-on-dark-muted);
+  /* =====================================================================
+   * Tagline Reveal Section (B11 Mandatory)
+   * ===================================================================== */
+  .tagline-reveal-section {
+    padding-top: 64px;
+    padding-bottom: 64px;
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-base);
   }
 
-  .intel-model-badge {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--text-on-dark-muted);
-    font-family: var(--font-mono);
+  .tagline-container {
+    max-width: 680px;
+    margin: 0 auto;
+    text-align: center;
   }
 
-  .intel-model-marker {
-    width: 7px;
-    height: 7px;
-    background: var(--accent-lime);
-    border-radius: 1px;
+  .tagline-text {
+    font-size: clamp(28px, 4.5vw, 40px);
+    line-height: clamp(36px, 5.2vw, 48px);
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+
+  .reveal-word {
     display: inline-block;
+    color: var(--reveal-word-muted);
+    transition: var(--transition-fluid);
+    margin-right: 0.25em;
   }
 
-  .action-destinations {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+  .reveal-word.active {
+    color: var(--reveal-word-active);
   }
 
-  .destination-pill {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border-dark-strong);
-    border-radius: var(--radius-md);
-    padding: 10px 14px;
+  /* =====================================================================
+   * Dedicated Demo View & Route Separation
+   * ===================================================================== */
+  /* In dedicated Demo View (/demo): hide marketing landing sections */
+  html[data-view="demo"] .hero-section,
+  html[data-view="demo"] .tagline-reveal-section,
+  html[data-view="demo"] .features-section,
+  html[data-view="demo"] .arch-section,
+  html[data-view="demo"] .rel-section,
+  html[data-view="demo"] .cta-section {
+    display: none !important;
+  }
+
+  /* In dedicated Demo View (/demo): show interactive demo */
+  html[data-view="demo"] .demo-section {
+    display: block !important;
+    padding-top: clamp(48px, 6vw, 72px);
+  }
+
+  /* In Landing View (/): hide interactive demo */
+  html:not([data-view="demo"]) .demo-section {
+    display: none !important;
+  }
+
+  /* Header button text swap based on active view */
+  html:not([data-view="demo"]) .btn-text-demo {
+    display: none;
+  }
+  html[data-view="demo"] .btn-text-landing {
+    display: none;
+  }
+
+  /* Breadcrumb & return link styling */
+  .demo-header-top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-on-dark);
-    transition: border-color 0.15s ease, background 0.15s ease;
-  }
-
-  .destination-pill:hover {
-    border-color: rgba(255, 255, 255, 0.3);
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .destination-pill .arrow {
-    color: var(--text-on-dark-muted);
-    font-size: 12px;
-  }
-
-  .circuit-footnote {
-    font-size: 11px;
-    font-family: var(--font-mono);
-    color: var(--text-on-dark-muted);
-    margin-top: 24px;
-    display: block;
-  }
-
-  /* Capability Strip (Transition Banner) */
-  .capability-strip {
-    background: var(--bg-sage);
-    border-top: 1px solid var(--border-light);
-    border-bottom: 1px solid var(--border-light);
-    padding: 20px 0;
-  }
-
-  .capability-inner {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px;
-    align-items: center;
+    margin-bottom: 24px;
+    width: 100%;
   }
 
-  .capability-item {
+  .demo-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-default);
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  }
+
+  .demo-back-btn:hover {
     color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    border-color: var(--border-strong);
+    background: var(--bg-surface-3);
   }
 
-  .capability-item::before {
-    content: "■";
-    font-size: 8px;
-    color: var(--blue-primary);
+  .demo-back-btn:active {
+    transform: scale(0.98);
   }
 
-  /* SECTION 1: Interactive Demo (Central Showcase) */
+  @media (max-width: 640px) {
+    .demo-header-top {
+      flex-direction: row;
+      justify-content: space-between;
+      width: 100%;
+    }
+  }
+
+  /* =====================================================================
+   * Interactive Demo Section
+   * ===================================================================== */
   .demo-section {
-    background: var(--bg-cream);
-    padding: clamp(64px, 8vw, 104px) 0;
-    scroll-margin-top: var(--header-h);
-    position: relative;
+    padding-top: clamp(64px, 8vw, 96px);
+    padding-bottom: clamp(64px, 8vw, 96px);
   }
 
   .demo-header {
-    margin-bottom: clamp(36px, 5vw, 56px);
-  }
-
-  .demo-headline-split {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  @media (min-width: 900px) {
-    .demo-headline-split {
-      flex-direction: row;
-      justify-content: space-between;
-      align-items: flex-end;
-    }
+    text-align: center;
+    max-width: 680px;
+    margin: 0 auto 48px auto;
   }
 
   .demo-title {
-    font-size: clamp(32px, 5vw, 56px);
-    line-height: 1.1;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
+    font-size: clamp(28px, 4vw, 36px);
+    line-height: 40px;
+    margin-bottom: 16px;
   }
 
   .demo-intro {
-    font-size: clamp(15px, 1.8vw, 16px);
-    line-height: 1.5;
+    font-size: 16px;
+    line-height: 24px;
     color: var(--text-muted);
-    max-width: 460px;
   }
 
   .demo-workspace {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 28px;
-    align-items: start;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    max-width: 720px;
+    margin: 0 auto;
+    width: 100%;
   }
 
-  @media (min-width: 1024px) {
-    .demo-workspace {
-      grid-template-columns: minmax(360px, 440px) 1fr;
-      gap: 36px;
-    }
-  }
-
-  /* Intake Form Card (Left) */
-  .intake-card {
-    background: var(--bg-white);
-    border: 1px solid var(--border-light);
+  /* Outer card per B3 (rounded-2xl 16px, padding 24px) */
+  .intake-card, .processing-card {
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-default);
     border-radius: var(--radius-xl);
-    padding: clamp(24px, 4vw, 36px);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+    padding: 24px;
+    min-width: 0;
+    box-shadow: var(--card-shadow);
   }
 
-  .intake-kicker {
+  .intake-header-meta, .proc-top-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .intake-kicker, .proc-title {
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+  }
+
+  .demo-scope-label {
     font-family: var(--font-mono);
     font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    letter-spacing: 0.06em;
+    line-height: 14px;
+    font-weight: 500;
     text-transform: uppercase;
-    margin-bottom: 4px;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    background: var(--bg-surface-3);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+    display: inline-flex;
+    align-items: center;
   }
 
   .intake-sub {
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 20px;
     color: var(--text-muted);
     margin-bottom: 24px;
   }
 
-  .form-group {
-    margin-bottom: 18px;
+  /* Preset quick selector */
+  .preset-bar {
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-bottom: 24px;
   }
 
-  .form-group label {
-    display: block;
-    font-size: 14px;
-    font-weight: 500;
+  .preset-bar-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    line-height: 16px;
+    font-family: var(--font-mono);
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  .reset-link {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 16px;
+    transition: color 150ms ease;
+  }
+
+  .reset-link:hover {
     color: var(--text-primary);
-    margin-bottom: 6px;
   }
 
-  .form-group .field-hint {
+  .preset-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .preset-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--chip-bg);
+    border: 1px solid var(--chip-border);
+    color: var(--chip-text);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 16px;
+    padding: 7px 14px;
+    border-radius: var(--radius-full);
+    transition: var(--transition-fluid);
+    cursor: pointer;
+  }
+
+  .preset-chip:hover {
+    color: var(--text-primary);
+    border-color: var(--border-highlight);
+    background: var(--bg-surface-3);
+    transform: translateY(-1px);
+  }
+
+  .preset-chip.active {
+    color: var(--chip-active-text);
+    background: var(--chip-active-bg);
+    border-color: var(--chip-active-border);
+  }
+
+  /* Banners */
+  .form-banner {
+    display: none;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    line-height: 20px;
+    margin-bottom: 20px;
+  }
+
+  .form-banner.error {
+    display: block;
+    background: var(--accent-red-bg);
+    border: 1px solid var(--accent-red);
+    color: var(--accent-red);
+  }
+
+  .form-banner.config-missing {
+    background: var(--accent-orange-bg);
+    border: 1px solid var(--accent-orange);
+    color: var(--accent-orange);
+  }
+
+  /* Outcome Result Panel */
+  .outcome-panel {
+    display: none;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .outcome-panel.visible {
+    display: block;
+    animation: fade-slide-in 400ms var(--ease-fluid) forwards;
+  }
+
+  @keyframes fade-slide-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .outcome-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .outcome-badge-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .outcome-status-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    background: var(--bg-surface-3);
+    color: var(--text-muted);
+  }
+
+  .outcome-status-icon.success {
+    background: var(--accent-green-bg);
+    color: var(--accent-green);
+    border: 1px solid var(--accent-green);
+  }
+
+  .outcome-status-icon.duplicate {
+    background: var(--accent-orange-bg);
+    color: var(--accent-orange);
+    border: 1px solid var(--accent-orange);
+  }
+
+  .outcome-status-title {
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+  }
+
+  .score-gauge-card {
+    background: var(--bg-surface-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .score-gauge-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .score-gauge-label {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-muted);
+  }
+
+  .score-gauge-val {
+    font-family: var(--font-mono);
+    font-size: 20px;
+    line-height: 28px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .score-gauge-max {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--text-dim);
+  }
+
+  .score-progress-track {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-surface-1);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+
+  .score-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--accent-blue);
+    border-radius: var(--radius-full);
+    transition: width 600ms var(--ease-fluid);
+  }
+
+  .score-progress-bar.qualified { background: var(--accent-green); }
+  .score-progress-bar.unqualified { background: var(--accent-orange); }
+
+  .score-reason-text {
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--text-muted);
+  }
+
+  .outcome-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* Form Elements */
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  .form-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+  }
+
+  .char-counter {
+    font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-dim);
-    margin-top: 4px;
+  }
+
+  .input-wrap {
+    position: relative;
+  }
+
+  .input-icon-svg {
+    position: absolute;
+    left: 14px;
+    top: 14px;
+    width: 16px;
+    height: 16px;
+    color: var(--text-dim);
+    pointer-events: none;
+    transition: color 150ms ease;
   }
 
   .form-input, .form-textarea {
     width: 100%;
-    padding: 12px 14px;
-    background: var(--bg-white);
-    border: 1px solid var(--border-light);
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
     border-radius: var(--radius-md);
-    font-family: var(--font-sans);
-    font-size: 14px;
     color: var(--text-primary);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-  }
-
-  .form-input:focus, .form-textarea:focus {
-    outline: none;
-    border-color: var(--blue-primary);
-    box-shadow: 0 0 0 3px rgba(49, 95, 234, 0.18);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 20px;
+    padding: 10px 14px 10px 40px;
+    transition: border-color 150ms ease, background 150ms ease;
   }
 
   .form-textarea {
+    min-height: 100px;
     resize: vertical;
-    min-height: 96px;
-    line-height: 1.45;
   }
 
-  .field-error {
-    font-size: 12px;
-    color: var(--accent-red);
-    margin-top: 4px;
-    display: none;
-    font-weight: 500;
+  .form-input::placeholder, .form-textarea::placeholder {
+    color: var(--text-dim);
+  }
+
+  .form-input:focus, .form-textarea:focus {
+    border-color: var(--input-focus-border);
+    background: var(--input-focus-bg);
   }
 
   .form-group.invalid .form-input,
   .form-group.invalid .form-textarea {
     border-color: var(--accent-red);
-    background: #FFF8F8;
   }
 
-  .form-group.invalid .field-error {
-    display: block;
+  .field-hint {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .field-error {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--accent-red);
+    margin-top: 4px;
+    min-height: 16px;
   }
 
   .submit-btn-full {
     width: 100%;
-    padding: 14px;
-    font-size: 14px;
-    font-weight: 600;
-    margin-top: 10px;
-    margin-bottom: 16px;
-    position: relative;
+    margin-top: 8px;
+    padding: 12px 20px;
   }
 
-  .submit-btn-full:disabled {
-    opacity: 0.75;
-    cursor: not-allowed;
-  }
-
-  /* Spinner icon inside button */
   .btn-spinner {
     display: none;
     width: 16px;
     height: 16px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
+    border: 2px solid rgba(125, 125, 125, 0.2);
+    border-top-color: var(--btn-primary-text);
     border-radius: 50%;
-    border-top-color: #FFFFFF;
-    animation: spin 0.8s linear infinite;
+    animation: spin 600ms linear infinite;
   }
 
   .submitting .btn-spinner {
@@ -803,192 +1311,108 @@
 
   .submit-disclaimer {
     font-size: 12px;
-    line-height: 1.45;
+    line-height: 16px;
     color: var(--text-dim);
-    border-top: 1px solid var(--border-light-subtle);
-    padding-top: 14px;
+    margin-top: 16px;
+    text-align: center;
   }
 
-  .form-banner {
-    padding: 12px 16px;
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    margin-bottom: 20px;
-    display: none;
-    line-height: 1.4;
-  }
-
-  .form-banner.error {
-    display: block;
-    background: #FDEDED;
-    border: 1px solid #F5C2C7;
-    color: #842029;
-  }
-
-  .form-banner.config-missing {
-    display: block;
-    background: #FFF3CD;
-    border: 1px solid #FFE69C;
-    color: #664D03;
-  }
-
-  /* Processing Workspace (Right) */
-  .processing-card {
-    background: var(--bg-sage);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-xl);
-    padding: clamp(24px, 4vw, 36px);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
-  }
-
+  /* Processing card (Right column) */
   .proc-kicker {
     font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    letter-spacing: 0.06em;
+    font-size: 12px;
+    line-height: 16px;
     text-transform: uppercase;
-    margin-bottom: 6px;
+    color: var(--text-dim);
   }
 
-  .proc-title {
-    font-size: clamp(20px, 3vw, 26px);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--text-primary);
-    margin-bottom: 28px;
+  .latency-indicator {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
   }
 
   .process-rail {
     display: flex;
     flex-direction: column;
-    gap: 0;
-    position: relative;
-    padding-left: 20px;
+    gap: 12px;
+    margin-top: 24px;
     margin-bottom: 24px;
   }
 
-  .process-rail::before {
-    content: "";
-    position: absolute;
-    left: 4px;
-    top: 16px;
-    bottom: 24px;
-    width: 2px;
-    background: var(--border-light);
-  }
-
   .rail-step {
-    position: relative;
-    padding-bottom: 18px;
-  }
-
-  .rail-marker {
-    position: absolute;
-    left: -20px;
-    top: 16px;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--border-light);
-    border: 2px solid var(--bg-sage);
-    transition: background 0.25s ease, transform 0.25s ease;
-  }
-
-  .rail-step.active .rail-marker {
-    background: var(--blue-primary);
-    transform: scale(1.3);
-  }
-
-  .rail-card {
-    background: var(--bg-cream);
-    border: 1px solid var(--border-light);
+    background: var(--rail-step-bg);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    padding: 14px 18px;
-    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .rail-step.active .rail-card {
-    border-color: var(--blue-primary);
-    box-shadow: 0 2px 10px rgba(49, 95, 234, 0.12);
-  }
-
-  .rail-card.dark-highlight {
-    background: var(--bg-dark-card);
-    border-color: var(--border-dark-strong);
-    color: var(--text-on-dark);
-  }
-
-  .rail-card.dark-highlight .rail-card-title {
-    color: var(--text-on-dark);
-  }
-
-  .rail-card.dark-highlight .rail-card-desc {
-    color: var(--text-on-dark-muted);
+    padding: 14px 16px;
+    transition: var(--transition-fluid);
   }
 
   .rail-card-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     font-size: 14px;
+    line-height: 20px;
     font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 3px;
+    margin-bottom: 4px;
   }
 
   .rail-card-desc {
-    font-size: 12px;
+    font-size: 13px;
+    line-height: 18px;
     color: var(--text-muted);
   }
 
+  .rail-step.active {
+    border-color: var(--rail-active-border);
+    background: var(--rail-active-bg);
+  }
+
   .proc-route-header {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    line-height: 16px;
+    font-family: var(--font-mono);
+    color: var(--text-dim);
     margin-bottom: 12px;
+    text-transform: uppercase;
   }
 
   .proc-destinations {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
     margin-bottom: 24px;
   }
 
   .proc-destination-pill {
-    background: var(--bg-cream);
-    border: 1px solid var(--border-light);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    padding: 12px 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
-    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-  }
-
-  .proc-destination-pill .arrow {
-    color: var(--text-muted);
+    padding: 10px 8px;
+    text-align: center;
     font-size: 12px;
+    line-height: 16px;
+    color: var(--text-muted);
+    transition: var(--transition-fluid);
   }
 
   .proc-destination-pill.selected {
-    background: var(--bg-dark);
-    color: var(--text-on-dark);
-    border-color: var(--border-dark);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+    border-color: var(--text-primary);
+    color: var(--btn-primary-text);
+    background: var(--btn-primary-bg);
   }
 
-  .proc-destination-pill.selected .arrow {
-    color: var(--accent-lime);
-  }
-
-  /* Status Block */
+  /* Status block */
   .status-block {
-    background: var(--bg-cream);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: 20px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px;
   }
 
   .status-block-header {
@@ -996,818 +1420,878 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 8px;
-    flex-wrap: wrap;
-    gap: 8px;
   }
 
   .status-state-tag {
     font-family: var(--font-mono);
     font-size: 12px;
-    font-weight: 600;
-    color: var(--accent-lime-dark);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .status-state-tag::before {
-    content: "●";
-    font-size: 10px;
+    line-height: 16px;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface-3);
+    color: var(--text-muted);
   }
 
   .status-state-tag.created {
+    background: var(--accent-green-bg);
     color: var(--accent-green);
   }
 
   .status-state-tag.duplicate {
+    background: var(--accent-orange-bg);
     color: var(--accent-orange);
   }
 
   .status-state-tag.error {
+    background: var(--accent-red-bg);
     color: var(--accent-red);
   }
 
   .status-block-copy {
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 13px;
+    line-height: 18px;
     color: var(--text-muted);
+    margin-bottom: 12px;
   }
 
   .status-details-toggle {
-    margin-top: 12px;
-    font-family: var(--font-mono);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 12px;
-    color: var(--blue-primary);
-    text-decoration: underline;
-    display: inline-block;
+    line-height: 16px;
+    color: var(--text-muted);
+    cursor: pointer;
   }
 
-  .status-details {
+  .status-details-toggle:hover {
+    color: var(--text-primary);
+  }
+
+  /* Telemetry Console (Dark Terminal) */
+  .telemetry-console {
+    background: #0C0C0C;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
     margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border-light);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-primary);
-    display: none;
+    overflow: hidden;
   }
 
-  .outcome-panel {
-    display: none;
-    padding: 24px;
-    text-align: center;
-  }
-
-  .outcome-panel.visible {
-    display: block;
-  }
-
-  .outcome-icon {
-    font-size: 36px;
-    margin-bottom: 12px;
-    line-height: 1;
-  }
-
-  .outcome-title {
-    font-size: 20px;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-
-  .outcome-desc {
-    font-size: 14px;
-    color: var(--text-muted);
-    margin-bottom: 20px;
-    line-height: 1.5;
-  }
-
-  /* SECTION 2: How It Works */
-  .how-section {
-    background: var(--bg-white);
-    padding: clamp(64px, 8vw, 104px) 0;
-    border-top: 1px solid var(--border-light);
-    border-bottom: 1px solid var(--border-light);
-    scroll-margin-top: var(--header-h);
-  }
-
-  .how-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: clamp(36px, 6vw, 64px);
-  }
-
-  @media (min-width: 960px) {
-    .how-grid {
-      grid-template-columns: minmax(360px, 460px) 1fr;
-    }
-  }
-
-  .how-title {
-    font-size: clamp(32px, 5vw, 56px);
-    line-height: 1.1;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
-    margin-bottom: 20px;
-  }
-
-  .how-intro {
-    font-size: clamp(15px, 1.8vw, 16px);
-    line-height: 1.6;
-    color: var(--text-muted);
-    margin-bottom: 32px;
-  }
-
-  .how-diagram-card {
-    background: var(--bg-cream);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: clamp(20px, 3vw, 28px);
-    font-family: var(--font-mono);
-    font-size: clamp(13px, 1.6vw, 15px);
-    line-height: 1.8;
-    color: var(--text-primary);
-    white-space: pre-wrap;
-    display: block;
-    max-width: 100%;
-  }
-
-  .how-steps-col {
+  .telemetry-console-bar {
     display: flex;
-    flex-direction: column;
-    gap: 18px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #141414;
+    border-bottom: 1px solid #222222;
   }
 
-  .how-step-card {
-    background: var(--bg-cream);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-xl);
-    padding: clamp(20px, 3vw, 32px);
+  .telemetry-bar-meta {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .telemetry-icon {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.12);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    line-height: 14px;
+  }
+
+  .telemetry-bar-actions {
+    display: flex;
+    align-items: center;
     gap: 10px;
-    transition: transform 0.2s ease, border-color 0.2s ease;
   }
 
-  .how-step-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(49, 95, 234, 0.4);
+  .telemetry-protocol {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: #666666;
+    letter-spacing: 0.05em;
   }
 
-  .how-step-num {
+  .telemetry-bar-title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #888888;
+  }
+
+  .telemetry-copy-btn {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #AAAAAA;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+  }
+
+  .telemetry-copy-btn:hover {
+    color: #FFFFFF;
+  }
+
+  .telemetry-body {
+    padding: 12px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .telemetry-code {
     font-family: var(--font-mono);
     font-size: 12px;
-    color: var(--text-muted);
-    font-weight: 500;
+    line-height: 18px;
+    color: #A3E635;
+    white-space: pre-wrap;
+    word-break: break-all;
   }
 
-  .how-step-name {
-    font-size: clamp(22px, 3vw, 28px);
-    font-weight: 500;
-    letter-spacing: -0.01em;
-    color: var(--text-primary);
+  /* =====================================================================
+   * Processing Rules Section (Features)
+   * ===================================================================== */
+  .features-section {
+    padding-top: clamp(64px, 8vw, 96px);
+    padding-bottom: clamp(64px, 8vw, 96px);
+    border-top: 1px solid var(--border-subtle);
   }
 
-  .how-step-desc {
-    font-size: 14px;
-    line-height: 1.55;
-    color: var(--text-muted);
+  .features-header {
+    max-width: 680px;
+    margin-bottom: 48px;
   }
 
-  /* SECTION 3: Technical Architecture */
-  .arch-section {
-    background: var(--bg-cream);
-    padding: clamp(64px, 8vw, 104px) 0;
-    scroll-margin-top: var(--header-h);
-  }
-
-  .arch-title {
-    font-size: clamp(32px, 5vw, 56px);
-    line-height: 1.1;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
+  .features-title {
+    font-size: clamp(28px, 4vw, 36px);
+    line-height: 40px;
     margin-bottom: 16px;
   }
 
-  .arch-intro {
-    font-size: clamp(15px, 1.8vw, 16px);
-    line-height: 1.5;
+  .features-intro {
+    font-size: 16px;
+    line-height: 24px;
     color: var(--text-muted);
-    margin-bottom: 40px;
-    max-width: 600px;
+  }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+  }
+
+  @media (max-width: 720px) {
+    .features-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .feature-card {
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    padding: 24px;
+    box-shadow: var(--card-shadow);
+    transition: var(--transition-fluid);
+  }
+
+  .feature-card:hover {
+    border-color: var(--border-highlight);
+    background: var(--bg-surface-2);
+  }
+
+  .feature-num {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  .feature-name {
+    font-size: 18px;
+    line-height: 28px;
+    margin-bottom: 8px;
+  }
+
+  .feature-desc {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-muted);
+  }
+
+  /* =====================================================================
+   * Technical Architecture Section
+   * ===================================================================== */
+  .arch-section {
+    padding-top: clamp(64px, 8vw, 96px);
+    padding-bottom: clamp(64px, 8vw, 96px);
+    border-top: 1px solid var(--border-subtle);
   }
 
   .arch-bus-wrap {
-    background: var(--bg-white);
-    border: 1px solid var(--border-light);
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-default);
     border-radius: var(--radius-xl);
-    padding: clamp(24px, 4vw, 36px);
-    margin-bottom: 40px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+    padding: 24px;
+    margin-top: 36px;
+    margin-bottom: 32px;
+    box-shadow: var(--card-shadow);
   }
 
-  .arch-phase-labels {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    margin-bottom: 24px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border-light);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-  }
-
-  .arch-phase-labels span:nth-child(2) { text-align: center; }
-  .arch-phase-labels span:nth-child(3) { text-align: right; }
-
-  /* 4-col 2-row architecture grid matching Figma */
   .arch-nodes-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
     gap: 16px;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
 
-  @media (min-width: 900px) {
+  @media (max-width: 860px) {
     .arch-nodes-grid {
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 480px) {
+    .arch-nodes-grid {
+      grid-template-columns: 1fr;
     }
   }
 
   .arch-node {
-    background: var(--bg-cream);
-    border: 1px solid var(--border-light);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     padding: 16px;
-    transition: transform 0.2s ease, border-color 0.2s ease;
+    transition: var(--transition-fluid);
   }
 
-  .arch-node:hover {
-    transform: translateY(-2px);
-    border-color: rgba(49, 95, 234, 0.3);
+  .arch-node.highlight-node {
+    border-color: var(--accent-blue);
+    background: var(--accent-blue-bg);
   }
-
-  .arch-node.dark-hero {
-    background: var(--bg-dark-card);
-    border-color: var(--border-dark-strong);
-    color: var(--text-on-dark);
-  }
-
-  .arch-node.dark-hero .arch-node-name { color: var(--text-on-dark); }
-  .arch-node.dark-hero .arch-node-role { color: var(--text-on-dark-muted); }
 
   .arch-node-name {
     font-size: 14px;
+    line-height: 20px;
     font-weight: 600;
-    color: var(--text-primary);
     margin-bottom: 4px;
   }
 
   .arch-node-role {
     font-size: 12px;
+    line-height: 16px;
     color: var(--text-muted);
   }
 
   .arch-fallback-pill {
-    background: var(--bg-sage);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
-    padding: 12px 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
-    text-align: center;
-    letter-spacing: 0.04em;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-full);
+    padding: 6px 14px;
   }
 
   .arch-columns {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 32px;
     margin-bottom: 24px;
   }
 
-  @media (min-width: 768px) {
+  @media (max-width: 720px) {
     .arch-columns {
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr;
     }
   }
 
   .arch-col-kicker {
     font-family: var(--font-mono);
     font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
-    margin-bottom: 8px;
+    line-height: 16px;
+    color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    margin-bottom: 8px;
   }
 
   .arch-col-text {
-    font-size: 15px;
-    line-height: 1.6;
+    font-size: 14px;
+    line-height: 20px;
     color: var(--text-muted);
   }
 
   .arch-footnote {
-    font-size: 11px;
-    font-family: var(--font-mono);
-    color: var(--text-muted);
-    display: block;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
   }
 
-  /* SECTION 4: Reliability and Transparency */
+  /* =====================================================================
+   * Reliability & Operational Limits
+   * ===================================================================== */
   .rel-section {
-    background: var(--bg-white);
-    padding: clamp(64px, 8vw, 104px) 0;
-    border-top: 1px solid var(--border-light);
-    border-bottom: 1px solid var(--border-light);
-    scroll-margin-top: var(--header-h);
+    padding-top: clamp(64px, 8vw, 96px);
+    padding-bottom: clamp(64px, 8vw, 96px);
+    border-top: 1px solid var(--border-subtle);
   }
 
   .rel-grid {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: clamp(36px, 6vw, 64px);
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
   }
 
-  @media (min-width: 960px) {
+  @media (max-width: 860px) {
     .rel-grid {
-      grid-template-columns: minmax(360px, 460px) 1fr;
+      grid-template-columns: 1fr;
     }
   }
 
   .rel-title {
-    font-size: clamp(32px, 5vw, 56px);
-    line-height: 1.1;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
-    margin-bottom: 28px;
+    font-size: clamp(28px, 4vw, 36px);
+    line-height: 40px;
+    margin-bottom: 24px;
   }
 
   .rel-stance-card {
-    background: var(--bg-sage);
-    border: 1px solid var(--border-light);
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-default);
     border-radius: var(--radius-xl);
-    padding: clamp(24px, 4vw, 36px);
+    padding: 24px;
+    box-shadow: var(--card-shadow);
   }
 
   .rel-stance-head {
-    font-size: clamp(22px, 3vw, 26px);
-    font-weight: 500;
-    color: var(--text-primary);
-    margin-bottom: 12px;
-    letter-spacing: -0.01em;
+    font-size: 16px;
+    line-height: 24px;
+    font-weight: 600;
+    margin-bottom: 8px;
   }
 
   .rel-stance-desc {
-    font-size: 13px;
-    line-height: 1.55;
-    color: var(--text-primary);
-    opacity: 0.85;
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-muted);
   }
 
   .rel-principles-list {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
   }
 
   .rel-principle-item {
-    border-bottom: 1px solid var(--border-light);
-    padding-bottom: 22px;
-    transition: transform 0.15s ease;
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    box-shadow: var(--card-shadow);
+    transition: var(--transition-fluid);
   }
 
-  .rel-principle-item:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
+  .rel-principle-item:hover {
+    border-color: var(--border-highlight);
   }
 
   .principle-title {
-    font-size: 20px;
+    font-size: 14px;
+    line-height: 20px;
     font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
 
   .principle-desc {
-    font-size: 15px;
-    line-height: 1.55;
+    font-size: 13px;
+    line-height: 18px;
     color: var(--text-muted);
-    margin-bottom: 10px;
   }
 
-  .principle-tag {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-dim);
-    letter-spacing: 0.05em;
-  }
-
-  /* SECTION 5: Closing CTA */
+  /* =====================================================================
+   * Closing CTA Section
+   * ===================================================================== */
   .cta-section {
-    background: var(--bg-cream);
-    padding: clamp(56px, 8vw, 88px) 0 clamp(40px, 6vw, 64px);
+    padding-top: 64px;
+    padding-bottom: 64px;
+    border-top: 1px solid var(--border-subtle);
   }
 
   .cta-card {
-    background: var(--bg-sage);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-2xl);
-    padding: clamp(36px, 6vw, 64px);
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+    background: var(--bg-surface-1);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    padding: 48px 24px;
+    text-align: center;
+    max-width: 680px;
+    margin: 0 auto;
+    box-shadow: var(--card-shadow);
   }
 
   .cta-kicker {
     font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 20px;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    margin-bottom: 12px;
   }
 
   .cta-title {
-    font-size: clamp(32px, 5.5vw, 64px);
-    line-height: 1.1;
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
-    margin-bottom: 16px;
-    max-width: 760px;
+    font-size: clamp(24px, 3.5vw, 32px);
+    line-height: 38px;
+    margin-bottom: 12px;
   }
 
   .cta-desc {
-    font-size: clamp(15px, 1.8vw, 17px);
-    line-height: 1.6;
+    font-size: 16px;
+    line-height: 24px;
     color: var(--text-muted);
-    max-width: 540px;
-    margin-bottom: 32px;
+    margin-bottom: 24px;
   }
 
-  /* Site Footer */
+  /* =====================================================================
+   * Site Footer (B10)
+   * ===================================================================== */
   .site-footer {
-    background: var(--bg-dark);
-    color: var(--text-on-dark);
-    padding: 64px 0 48px;
-    border-top: 1px solid var(--border-dark);
+    padding-top: 48px;
+    padding-bottom: 48px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-base);
   }
 
   .footer-inner {
     display: flex;
     flex-direction: column;
-    gap: 40px;
+    gap: 32px;
   }
 
   .footer-top {
     display: flex;
-    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-start;
     gap: 32px;
-  }
-
-  @media (min-width: 768px) {
-    .footer-top {
-      flex-direction: row;
-      justify-content: space-between;
-      align-items: flex-start;
-    }
-  }
-
-  .footer-brand {
-    max-width: 440px;
-  }
-
-  .footer-brand .brand-identity {
-    margin-bottom: 14px;
+    flex-wrap: wrap;
   }
 
   .footer-desc {
     font-size: 14px;
-    line-height: 1.6;
-    color: var(--text-on-dark-muted);
+    line-height: 20px;
+    color: var(--text-muted);
+    max-width: 380px;
+    margin-top: 12px;
   }
 
   .footer-nav {
     display: flex;
-    flex-direction: column;
-    gap: 14px;
-  }
-
-  @media (min-width: 640px) {
-    .footer-nav {
-      flex-direction: row;
-      gap: 32px;
-    }
+    gap: 24px;
+    flex-wrap: wrap;
   }
 
   .footer-link {
     font-size: 14px;
-    font-weight: 500;
-    color: var(--text-on-dark-muted);
-    transition: color 0.15s ease;
+    line-height: 20px;
+    color: var(--text-muted);
   }
 
   .footer-link:hover {
-    color: var(--text-on-dark);
+    color: var(--text-primary);
   }
 
   .footer-bottom {
-    font-family: var(--font-mono);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
     font-size: 12px;
-    color: var(--text-on-dark-muted);
+    line-height: 16px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border-subtle);
     padding-top: 24px;
-    border-top: 1px solid var(--border-dark);
+    flex-wrap: wrap;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 </style>
 </head>
 <body>
 
-<!-- Reading Progress Bar -->
+<a href="#main-content" class="skip-link">Skip to main content</a>
 <div class="reading-progress-bar" id="reading-progress" aria-hidden="true"></div>
 
-<!-- Header / Navigation -->
-<header class="site-header" id="site-header">
-  <div class="container">
-    <div class="nav-inner">
-      <a href="#hero" class="brand-identity" aria-label="LeadIntel Home">
-        <svg class="brand-logo-svg" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <rect x="1" y="1" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
-          <rect x="18" y="1" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
-          <rect x="18" y="18" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
+<!-- Fluid Island Nav per B7 -->
+<div class="header-wrapper">
+  <header class="island-nav" id="site-header">
+    <a href="/" class="brand-identity" id="brand-home-link" aria-label="LeadIntel Home">
+      <svg class="brand-logo-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="2" y="2" width="8" height="8" rx="2" fill="var(--accent-blue)"/>
+        <rect x="14" y="2" width="8" height="8" rx="2" fill="var(--brand-cube-color)"/>
+        <rect x="14" y="14" width="8" height="8" rx="2" fill="var(--accent-green)"/>
+      </svg>
+      <span class="brand-wordmark">LeadIntel</span>
+    </a>
+
+    <nav class="desktop-nav" aria-label="Primary Navigation">
+      <a href="/demo" class="nav-link" data-section="demo" data-demo-cta>Interactive demo</a>
+      <a href="#how-it-works" class="nav-link" data-section="how-it-works">Processing rules</a>
+      <a href="#architecture" class="nav-link" data-section="architecture">Request path</a>
+      <a href="#reliability" class="nav-link" data-section="reliability">Operational limits</a>
+    </nav>
+
+    <div class="nav-cta-wrap">
+      <!-- Theme Switcher Button -->
+      <button type="button" class="theme-toggle-btn" id="theme-toggle-btn" aria-label="Toggle color theme" title="Toggle theme">
+        <!-- Sun icon (shown in dark mode to switch to light) -->
+        <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v2"></path>
+          <path d="M12 20v2"></path>
+          <path d="m4.93 4.93 1.41 1.41"></path>
+          <path d="m17.66 17.66 1.41 1.41"></path>
+          <path d="M2 12h2"></path>
+          <path d="M20 12h2"></path>
+          <path d="m6.34 17.66-1.41 1.41"></path>
+          <path d="m19.07 4.93-1.41 1.41"></path>
         </svg>
-        <span class="brand-wordmark">LeadIntel</span>
+        <!-- Moon icon (shown in light mode to switch to dark) -->
+        <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+        </svg>
+      </button>
+
+      <a href="/demo" class="btn-primary btn-header" data-demo-cta>
+        <span class="btn-text-landing">Try demo &rarr;</span>
+        <span class="btn-text-demo">&larr; Back to overview</span>
       </a>
 
-      <!-- Desktop Nav -->
-      <nav class="desktop-nav" aria-label="Primary Navigation">
-        <a href="#how-it-works" class="nav-link" data-section="how-it-works">How it works</a>
-        <a href="#demo" class="nav-link" data-section="demo">Interactive demo</a>
-        <a href="#architecture" class="nav-link" data-section="architecture">Architecture</a>
-        <a href="#reliability" class="nav-link" data-section="reliability">Reliability</a>
-      </nav>
-
-      <div class="nav-cta-wrap">
-        <a href="#demo" class="btn-primary">Try the demo</a>
-
-        <!-- Mobile Menu Toggle Button -->
-        <button type="button" class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="mobile-drawer">
-          <span class="hamburger-icon">
-            <span class="hamburger-line"></span>
-            <span class="hamburger-line"></span>
-            <span class="hamburger-line"></span>
-          </span>
-        </button>
-      </div>
+      <button type="button" class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="mobile-drawer">
+        <span class="hamburger-icon">
+          <span class="hamburger-line"></span>
+          <span class="hamburger-line"></span>
+          <span class="hamburger-line"></span>
+        </span>
+      </button>
     </div>
-  </div>
+  </header>
+</div>
 
-  <!-- Mobile Drawer Menu -->
-  <div class="mobile-drawer" id="mobile-drawer" role="region" aria-label="Mobile Navigation">
-    <a href="#demo" class="mobile-nav-link" data-section="demo">Interactive demo</a>
-    <a href="#how-it-works" class="mobile-nav-link" data-section="how-it-works">How it works</a>
-    <a href="#architecture" class="mobile-nav-link" data-section="architecture">Architecture</a>
-    <a href="#reliability" class="mobile-nav-link" data-section="reliability">Reliability</a>
-    <a href="#demo" class="btn-primary" style="margin-top: 8px;">Try the demo &rarr;</a>
-  </div>
-</header>
+<!-- Mobile Drawer per B7 -->
+<div class="mobile-drawer" id="mobile-drawer" role="region" aria-label="Mobile Navigation">
+  <a href="/demo" class="mobile-nav-link" data-section="demo" data-demo-cta>Interactive demo</a>
+  <a href="#how-it-works" class="mobile-nav-link" data-section="how-it-works">Processing rules</a>
+  <a href="#architecture" class="mobile-nav-link" data-section="architecture">Request path</a>
+  <a href="#reliability" class="mobile-nav-link" data-section="reliability">Operational limits</a>
+  <a href="/demo" class="btn-primary" style="margin-top: 8px;" data-demo-cta>
+    <span class="btn-text-landing">Try demo &rarr;</span>
+    <span class="btn-text-demo">&larr; Back to overview</span>
+  </a>
+</div>
 
-<main>
-  <!-- CHAPTER 0: Hero / Signal to action -->
+<main id="main-content">
+  <!-- Hero Section per B5 -->
   <section class="hero-section" id="hero" data-section="hero">
     <div class="container">
-      <div class="section-chapter-tag dark">
-        <span class="tag-dot"></span>
-        <span>Overview / Autonomous Qualification</span>
-      </div>
+      <div class="hero-content">
+        <a href="/demo" class="hero-badge" aria-label="Explore the qualification pipeline" data-demo-cta>
+          <span class="hero-badge-tag">PIPELINE</span>
+          <span class="hero-badge-divider"></span>
+          <span class="hero-badge-label">Inbound lead qualification</span>
+          <span class="hero-badge-arrow">&rarr;</span>
+        </a>
 
-      <h1 class="hero-headline">
-        Turn incoming leads
-        <span class="indent-line">into actionable</span>
-        <span class="indent-line">opportunities.</span>
-      </h1>
+        <h1 class="hero-headline">
+          Inbound leads verified in real time, without pipeline friction.
+        </h1>
 
-      <div class="hero-split">
         <p class="hero-value-prop">
-          Validate enquiries, identify duplicates, prioritize leads, and route the next action through one traceable, fault-tolerant workflow.
+          LeadIntel validates schema requirements, detects duplicate submissions, computes qualification scores, and routes accepted prospects through n8n.
         </p>
+
         <div class="hero-actions">
-          <a href="#demo" class="btn-primary">Try the interactive demo</a>
-          <a href="#how-it-works" class="explore-link">Explore how it works &nearr;</a>
+          <a href="/demo" class="btn-primary" data-demo-cta>Try the demo form &rarr;</a>
+          <a href="#architecture" class="hero-secondary-link">Inspect request path &nearr;</a>
         </div>
       </div>
 
-      <!-- Illustrative Circuit graphic -->
-      <div class="hero-circuit-wrap">
-        <div class="circuit-grid">
-          <!-- Signal Column -->
-          <div>
-            <span class="circuit-col-title">Signal / Enquiry record</span>
-            <div class="signal-card" tabindex="0" role="region" aria-label="Illustrative enquiry record">
-              <span class="signal-badge">INBOUND.ENQUIRY</span>
-              <div class="signal-contact">Alex Morgan / Northline</div>
-              <div class="signal-text">&ldquo;We need a clearer way to qualify inbound enquiries.&rdquo;</div>
-            </div>
-          </div>
-
-          <!-- Intelligence Column -->
-          <div>
-            <span class="circuit-col-title">Intelligence / Interpret the signal</span>
-            <div class="intel-card" tabindex="0" role="region" aria-label="Intelligence processing stage">
-              <div class="intel-title">Validation &rarr; duplicate check</div>
-              <div class="intel-subtitle">Required information &middot; persistent record</div>
-            </div>
-            <div class="intel-model-badge">
-              <span class="intel-model-marker"></span>
-              <span>Configurable LLM &rarr; deterministic fallback</span>
-            </div>
-          </div>
-
-          <!-- Action Column -->
-          <div>
-            <span class="circuit-col-title">Action / Possible paths</span>
-            <div class="action-destinations">
-              <div class="destination-pill" tabindex="0">
-                <span>Manual review</span>
-                <span class="arrow">&nearr;</span>
-              </div>
-              <div class="destination-pill" tabindex="0">
-                <span>Not qualified</span>
-                <span class="arrow">&nearr;</span>
-              </div>
-              <div class="destination-pill" tabindex="0">
-                <span>Qualified</span>
-                <span class="arrow">&nearr;</span>
-              </div>
-            </div>
-          </div>
+      <div class="hero-flow" aria-label="Lead intake lifecycle summary">
+        <div class="hero-flow-step">
+          <span>01 / INTAKE</span>
+          Browser sends JSON payload
         </div>
-        <span class="circuit-footnote">Illustrative workflow &mdash; not live execution.</span>
+        <div class="hero-flow-step">
+          <span>02 / VALIDATE</span>
+          FastAPI enforces schema
+        </div>
+        <div class="hero-flow-step">
+          <span>03 / SCORE</span>
+          Intelligent scoring with fallback
+        </div>
+        <div class="hero-flow-step">
+          <span>04 / ROUTE</span>
+          n8n dispatches audit logs
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- Capability Transition Strip -->
-  <aside class="capability-strip" aria-label="Key Capabilities">
+  <!-- Tagline Reveal Section per B11 (Mandatory) -->
+  <section class="tagline-reveal-section" id="tagline-reveal">
     <div class="container">
-      <div class="capability-inner">
-        <span class="capability-item">Structured intake</span>
-        <span class="capability-item">Duplicate prevention</span>
-        <span class="capability-item">Intelligent scoring with fallback</span>
-        <span class="capability-item">Qualification and routing</span>
+      <div class="tagline-container">
+        <div class="section-tag" style="margin-bottom: 16px;">
+          <span class="section-tag-index">SPEC</span>
+          <span class="section-tag-sep">/</span>
+          <span>Guaranteed integrity</span>
+        </div>
+        <p class="tagline-text" id="tagline-reveal-target">
+          Every lead verified at intake. Zero duplicates in your database. Instant routing for qualified prospects.
+        </p>
       </div>
     </div>
-  </aside>
+  </section>
 
-  <!-- CHAPTER 1: Interactive demo (The Central Application Experience) -->
+  <!-- Interactive Demo Section -->
   <section class="demo-section" id="demo" data-section="demo">
     <div class="container">
       <div class="demo-header">
-        <div class="section-chapter-tag light">
-          <span class="tag-dot"></span>
-          <span>Chapter 01 / Live Interactive Demo</span>
+        <div class="demo-header-top">
+          <a href="/" class="demo-back-btn" id="demo-back-btn" aria-label="Return to marketing overview">
+            <span aria-hidden="true">&larr;</span> Back to overview
+          </a>
+          <div class="section-tag" style="margin-bottom: 0;">
+            <span class="section-tag-index">01</span>
+            <span class="section-tag-sep">/</span>
+            <span>Interactive demo</span>
+          </div>
         </div>
-        <div class="demo-headline-split">
-          <h2 class="demo-title">Start with one enquiry.</h2>
-          <p class="demo-intro">
-            Follow the logic from structured intake to a possible next action. One enquiry. One traceable path.
-          </p>
-        </div>
+        <h2 class="demo-title">Test the live intake engine.</h2>
+        <p class="demo-intro">
+          Send a simulated enquiry to observe real-time schema validation, PostgreSQL persistence, and scoring. Use illustrative data only.
+        </p>
       </div>
 
       <div class="demo-workspace">
-        <!-- Enquiry Intake Form (Left) -->
+        <!-- Lead Intake Card (Primary Centerpiece) -->
         <div class="intake-card">
-          <div class="intake-kicker">Input / Your test enquiry</div>
-          <div class="intake-sub">All fields are required. Submissions run through live ingestion.</div>
+          <div class="intake-header-meta">
+            <span class="intake-kicker" id="form-title">Lead intake</span>
+            <span class="demo-scope-label">LIVE ENDPOINT</span>
+          </div>
+          <div class="intake-sub">All four fields are required. Submissions are processed by the live backend.</div>
+
+          <!-- Scenario Quick-Select Bar -->
+          <div class="preset-bar">
+            <div class="preset-bar-title">
+              <span>Illustrative sample data</span>
+              <button type="button" class="reset-link" id="preset-clear-btn">Clear</button>
+            </div>
+            <div class="preset-chips">
+              <button type="button" class="preset-chip" id="preset-enterprise" data-persona="enterprise" title="High-intent buyer with budget and timeline">
+                <span>Enterprise buyer</span>
+              </button>
+              <button type="button" class="preset-chip" id="preset-discovery" data-persona="discovery" title="Exploratory inquiry requiring discovery">
+                <span>Discovery inquiry</span>
+              </button>
+              <button type="button" class="preset-chip" id="preset-spam" data-persona="spam" title="Generic message with low intent">
+                <span>Low-intent lead</span>
+              </button>
+              <button type="button" class="preset-chip" id="preset-duplicate" data-persona="duplicate" title="Re-submit with matching external ID to test 409 rejection">
+                <span>Duplicate test</span>
+              </button>
+            </div>
+          </div>
 
           <div id="config-banner" class="form-banner config-missing" hidden></div>
           <div id="banner" class="form-banner" role="alert" aria-live="polite"></div>
 
-          <!-- Outcome: Success -->
-          <div id="success-panel" class="outcome-panel" role="region" aria-label="Lead Created Successfully" tabindex="-1">
-            <div class="outcome-icon">&check;</div>
-            <h3 class="outcome-title">Lead Created &amp; Evaluated</h3>
-            <p class="outcome-desc">
-              Your test lead was persisted to PostgreSQL, scored via the pipeline, and evaluated for automated dispatch.
-            </p>
-            <button type="button" id="success-reset" class="btn-primary">Submit another enquiry</button>
-          </div>
+          <!-- Outcome Panel (In-Place Result) -->
+          <div id="outcome-panel" class="outcome-panel" role="region" aria-label="Submission result" aria-live="polite" tabindex="-1">
+            <div class="outcome-panel-header">
+              <div class="outcome-badge-wrap">
+                <div class="outcome-status-icon" id="outcome-icon">&check;</div>
+                <div>
+                  <div class="outcome-status-title" id="outcome-title">Submission result</div>
+                  <div style="font-size: 13px; color: var(--text-muted);" id="outcome-sub">No enquiry has been sent.</div>
+                </div>
+              </div>
+              <span id="outcome-ext-id" style="font-size: 12px; color: var(--text-dim); font-family: var(--font-mono);">ID: Ready</span>
+            </div>
 
-          <!-- Outcome: Duplicate -->
-          <div id="duplicate-panel" class="outcome-panel" role="region" aria-label="Duplicate Lead Detected" tabindex="-1">
-            <div class="outcome-icon">&odot;</div>
-            <h3 class="outcome-title">Duplicate Lead Detected</h3>
-            <p class="outcome-desc">
-              This client-generated external ID was already ingested. Duplicate prevention kept the existing record intact without duplicate contamination.
-            </p>
-            <button type="button" id="duplicate-reset" class="btn-primary">Reset enquiry form</button>
+            <!-- Score Gauge Box -->
+            <div class="score-gauge-card" id="score-gauge-card">
+              <div class="score-gauge-row">
+                <span class="score-gauge-label">Qualification score</span>
+                <div>
+                  <span class="score-gauge-val" id="score-gauge-val">—</span>
+                  <span class="score-gauge-max">/100</span>
+                </div>
+              </div>
+              <div class="score-progress-track">
+                <div class="score-progress-bar" id="score-progress-bar"></div>
+              </div>
+              <p class="score-reason-text" id="score-reason-text">
+                A score will appear when returned by the backend.
+              </p>
+            </div>
+
+            <!-- Outcome Actions -->
+            <div class="outcome-actions">
+              <button type="button" id="outcome-test-dup-btn" class="btn-secondary">
+                Re-submit (Test Duplicate)
+              </button>
+              <button type="button" id="outcome-reset-btn" class="btn-primary">
+                + Submit New Enquiry
+              </button>
+            </div>
           </div>
 
           <!-- The Lead Intake Form -->
-          <form id="lead-form" novalidate>
+          <form id="lead-form" aria-labelledby="form-title" novalidate>
             <div class="form-group" id="field-name">
-              <label for="name">Contact name *</label>
-              <input type="text" id="name" name="name" class="form-input" placeholder="Alex Morgan" required autocomplete="name" data-rail-step="1">
-              <div class="field-hint">Who should we follow up with?</div>
-              <div class="field-error" id="name-error"></div>
+              <div class="form-label-row">
+                <label for="name">Contact name <span aria-hidden="true">*</span><span class="sr-only"> (required)</span></label>
+              </div>
+              <div class="input-wrap">
+                <svg class="input-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                <input type="text" id="name" name="name" class="form-input" placeholder="Jamie Example" required autocomplete="name" aria-describedby="name-hint name-error" data-rail-step="1">
+              </div>
+              <div class="field-hint" id="name-hint">Use fictional contact details in this demo.</div>
+              <div class="field-error" id="name-error" aria-live="polite"></div>
             </div>
 
             <div class="form-group" id="field-email">
-              <label for="email">Work email *</label>
-              <input type="email" id="email" name="email" class="form-input" placeholder="alex@company.com" required autocomplete="email" data-rail-step="1">
-              <div class="field-hint">Use a valid work email for follow-up.</div>
-              <div class="field-error" id="email-error"></div>
+              <div class="form-label-row">
+                <label for="email">Email address <span aria-hidden="true">*</span><span class="sr-only"> (required)</span></label>
+              </div>
+              <div class="input-wrap">
+                <svg class="input-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                  <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+                </svg>
+                <input type="email" id="email" name="email" class="form-input" placeholder="jamie@example.com" required autocomplete="email" aria-describedby="email-hint email-error" data-rail-step="1">
+              </div>
+              <div class="field-hint" id="email-hint">Valid email format required; fictional addresses accepted.</div>
+              <div class="field-error" id="email-error" aria-live="polite"></div>
             </div>
 
             <div class="form-group" id="field-company">
-              <label for="company">Company *</label>
-              <input type="text" id="company" name="company" class="form-input" placeholder="Northline" required autocomplete="organization" data-rail-step="2">
-              <div class="field-hint">Your company or organisation.</div>
-              <div class="field-error" id="company-error"></div>
+              <div class="form-label-row">
+                <label for="company">Company or organisation <span aria-hidden="true">*</span><span class="sr-only"> (required)</span></label>
+              </div>
+              <div class="input-wrap">
+                <svg class="input-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2" y="7" width="20" height="14" rx="2"></rect>
+                  <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                </svg>
+                <input type="text" id="company" name="company" class="form-input" placeholder="Acme Systems" required autocomplete="organization" aria-describedby="company-hint company-error" data-rail-step="2">
+              </div>
+              <div class="field-hint" id="company-hint">Organisation or workspace name.</div>
+              <div class="field-error" id="company-error" aria-live="polite"></div>
             </div>
 
             <div class="form-group" id="field-message">
-              <label for="message">Enquiry message *</label>
-              <textarea id="message" name="message" class="form-textarea" placeholder="We need a clearer way to qualify inbound enquiries…" required data-rail-step="3"></textarea>
-              <div class="field-hint">Include your needs and relevant context.</div>
-              <div class="field-error" id="message-error"></div>
+              <div class="form-label-row">
+                <label for="message">Requirements or enquiry <span aria-hidden="true">*</span><span class="sr-only"> (required)</span></label>
+                <span class="char-counter" id="message-char-count">0 / 500</span>
+              </div>
+              <div class="input-wrap">
+                <svg class="input-icon-svg" style="top: 14px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <textarea id="message" name="message" class="form-textarea" maxlength="500" placeholder="Example: We receive inbound enquiries and need automated qualification and PostgreSQL persistence." required aria-describedby="message-hint message-error message-char-count" data-rail-step="3"></textarea>
+              </div>
+              <div class="field-hint" id="message-hint">A concise description is sufficient. Do not include confidential data.</div>
+              <div class="field-error" id="message-error" aria-live="polite"></div>
             </div>
 
             <button type="submit" id="submit-btn" class="btn-primary submit-btn-full">
               <span class="btn-spinner"></span>
-              <span id="submit-label">Submit test lead</span>
+              <span id="submit-label">Send demo enquiry &rarr;</span>
             </button>
 
             <div class="submit-disclaimer">
-              Connected live demo &mdash; sends payload to <code>/webhook/lead-intake</code> to test validation, deduplication, scoring, and notification routing.
+              This is a working sandbox demo. Requests are validated by FastAPI, stored in PostgreSQL, and routed via n8n.
             </div>
           </form>
         </div>
 
-        <!-- Processing Workspace (Right) -->
+        <!-- Processing Workspace (Live Pipeline Execution) -->
         <div class="processing-card">
-          <div class="proc-kicker">Live Trace / Pipeline Execution</div>
-          <h3 class="proc-title">How the workflow processes your lead</h3>
+          <div class="proc-top-meta">
+            <span class="proc-kicker">Pipeline execution</span>
+            <span class="latency-indicator" id="latency-badge">
+              <span id="latency-text">Response time: Ready</span>
+            </span>
+          </div>
+          <h3 class="proc-title">One request, traceable lifecycle</h3>
 
           <div class="process-rail">
             <!-- Step 1 -->
             <div class="rail-step" id="rail-step-1">
-              <span class="rail-marker"></span>
-              <div class="rail-card">
-                <div class="rail-card-title">Receive and validate</div>
-                <div class="rail-card-desc">Required fields and input format</div>
+              <div class="rail-card-title">
+                <span>01. Form and webhook</span>
+                <span id="step-1-status" style="font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);">n8n</span>
               </div>
+              <div class="rail-card-desc">The browser sends a same-origin JSON request to the intake webhook.</div>
             </div>
 
             <!-- Step 2 -->
             <div class="rail-step" id="rail-step-2">
-              <span class="rail-marker"></span>
-              <div class="rail-card">
-                <div class="rail-card-title">Check for duplicates</div>
-                <div class="rail-card-desc">Compare against existing records</div>
+              <div class="rail-card-title">
+                <span>02. Validate and persist</span>
+                <span id="step-2-status" style="font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);">FastAPI</span>
               </div>
+              <div class="rail-card-desc">FastAPI validates fields, rejects duplicate source/external ID pairs, and writes the record.</div>
             </div>
 
             <!-- Step 3 -->
             <div class="rail-step" id="rail-step-3">
-              <span class="rail-marker"></span>
-              <div class="rail-card">
-                <div class="rail-card-title">Persist the record</div>
-                <div class="rail-card-desc">PostgreSQL &middot; retain enquiry context</div>
+              <div class="rail-card-title">
+                <span>03. Score intent</span>
+                <span id="step-3-status" style="font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);">FastAPI</span>
               </div>
+              <div class="rail-card-desc">An LLM evaluates intent; deterministic heuristics are used if LLM scoring is unavailable.</div>
             </div>
 
             <!-- Step 4 -->
             <div class="rail-step" id="rail-step-4">
-              <span class="rail-marker"></span>
-              <div class="rail-card dark-highlight">
-                <div class="rail-card-title">Score the lead</div>
-                <div class="rail-card-desc">Configurable LLM / deterministic fallback</div>
+              <div class="rail-card-title">
+                <span>04. Qualify and route</span>
+                <span id="step-4-status" style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-green);">n8n</span>
               </div>
+              <div class="rail-card-desc">n8n applies the 70-point qualification threshold and records audit events.</div>
             </div>
           </div>
 
-          <div class="proc-route-header">Route the outcome and applicable notifications</div>
+          <div class="proc-route-header">
+            <span>Qualification rules</span>
+            <span style="font-family: var(--font-mono); font-weight: normal; color: var(--text-dim);">Threshold &ge; 70</span>
+          </div>
+
           <div class="proc-destinations">
             <div class="proc-destination-pill" id="dest-manual">
-              <span>Manual review</span>
-              <span class="arrow">&nearr;</span>
+              Manual review
             </div>
             <div class="proc-destination-pill" id="dest-unqualified">
-              <span>Not qualified</span>
-              <span class="arrow">&nearr;</span>
+              Not qualified
             </div>
             <div class="proc-destination-pill" id="dest-qualified">
-              <span>Qualified</span>
-              <span class="arrow">&nearr;</span>
+              Qualified
             </div>
           </div>
 
@@ -1815,14 +2299,32 @@
           <div class="status-block" id="status-block">
             <div class="status-block-header">
               <span class="status-state-tag" id="status-state-label">Awaiting submission</span>
-              <span class="mono-kicker" id="external-id-badge" style="color: var(--text-dim);">ID: Ready</span>
+              <span id="external-id-badge" style="color: var(--text-dim); font-family: var(--font-mono); font-size: 12px;">ID: Ready</span>
             </div>
             <p class="status-block-copy" id="status-block-desc">
-              No result yet. When you submit a test lead, the pipeline records the enquiry, executes qualification scoring, and surfaces the routed outcome.
+              After the API returns HTTP 201, n8n executes qualification logic and writes the audit event.
             </p>
-            <a href="javascript:void(0)" class="status-details-toggle" id="details-toggle">View payload telemetry &darr;</a>
-            <div class="status-details" id="status-details">
-              <pre id="payload-preview" style="white-space: pre-wrap; word-break: break-all;"></pre>
+
+            <button type="button" class="status-details-toggle" id="details-toggle" aria-controls="status-details" aria-expanded="false">
+              <span>View request / response details</span>
+              <span id="details-arrow">&darr;</span>
+            </button>
+
+            <!-- Terminal Telemetry Console -->
+            <div class="telemetry-console" id="status-details" style="display: none;">
+              <div class="telemetry-console-bar">
+                <div class="telemetry-bar-meta">
+                  <span class="telemetry-icon">&gt;_</span>
+                  <span class="telemetry-bar-title" id="telemetry-title">Request and response JSON</span>
+                </div>
+                <div class="telemetry-bar-actions">
+                  <span class="telemetry-protocol">LIVE STREAM</span>
+                  <button type="button" class="telemetry-copy-btn" id="telemetry-copy-btn">Copy JSON</button>
+                </div>
+              </div>
+              <div class="telemetry-body">
+                <pre class="telemetry-code" id="payload-preview"></pre>
+              </div>
             </div>
           </div>
         </div>
@@ -1830,240 +2332,214 @@
     </div>
   </section>
 
-  <!-- CHAPTER 2: How it works (The Editorial Process) -->
-  <section class="how-section" id="how-it-works" data-section="how-it-works">
+  <!-- Processing Rules Section (Features) -->
+  <section class="features-section" id="how-it-works" data-section="how-it-works">
     <div class="container">
-      <div class="section-chapter-tag light">
-        <span class="tag-dot"></span>
-        <span>Chapter 02 / Explicit Lifecycle Stages</span>
+      <div class="features-header">
+        <div class="section-tag">
+          <span class="section-tag-index">02</span>
+          <span class="section-tag-sep">/</span>
+          <span>Processing rules</span>
+        </div>
+        <h2 class="features-title">Validation first. Routing second.</h2>
+        <p class="features-intro">
+          Responsibilities are cleanly separated: FastAPI manages intake verification and scoring, while n8n manages workflow branches and audit logs.
+        </p>
       </div>
 
-      <div class="how-grid">
-        <div>
-          <h2 class="how-title">A signal is only the beginning.</h2>
-          <p class="how-intro">
-            Make each transition explicit: what comes in, how it is interpreted, and where it can go next.
-          </p>
-
-          <div class="how-diagram-card">SIGNAL
-    &darr;
-INTELLIGENCE
-    └──&rarr; ACTION</div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <span class="feature-num">01 / VALIDATE</span>
+          <h3 class="feature-name">Strict schema validation</h3>
+          <p class="feature-desc">FastAPI requires name, valid email format, company, message, and source. Invalid requests return HTTP 422 before any lead is stored.</p>
         </div>
 
-        <div class="how-steps-col">
-          <!-- Step 1 -->
-          <div class="how-step-card">
-            <span class="how-step-num">01</span>
-            <h3 class="how-step-name">Capture</h3>
-            <p class="how-step-desc">Collect inbound enquiries through a structured form with immediate client-side and server-side validation.</p>
-          </div>
+        <div class="feature-card">
+          <span class="feature-num">02 / DEDUPLICATE</span>
+          <h3 class="feature-name">Composite duplicate protection</h3>
+          <p class="feature-desc">A repeated source and external ID pair returns HTTP 409 Conflict instead of creating redundant records in PostgreSQL.</p>
+        </div>
 
-          <!-- Step 2 -->
-          <div class="how-step-card">
-            <span class="how-step-num">02</span>
-            <h3 class="how-step-name">Validate</h3>
-            <p class="how-step-desc">Validate payload integrity and enforce idempotency against existing records using composite database constraints.</p>
-          </div>
+        <div class="feature-card">
+          <span class="feature-num">03 / SCORE</span>
+          <h3 class="feature-name">Resilient intent scoring</h3>
+          <p class="feature-desc">FastAPI uses LLM scoring when available, automatically falling back to deterministic heuristics if provider requests fail.</p>
+        </div>
 
-          <!-- Step 3 -->
-          <div class="how-step-card">
-            <span class="how-step-num">03</span>
-            <h3 class="how-step-name">Prioritize</h3>
-            <p class="how-step-desc">Configurable LLM scoring with guaranteed deterministic heuristic fallback when third-party APIs timeout.</p>
-          </div>
-
-          <!-- Step 4 -->
-          <div class="how-step-card">
-            <span class="how-step-num">04</span>
-            <h3 class="how-step-name">Route</h3>
-            <p class="how-step-desc">Explicit qualification rules dispatch alerts to Telegram, WhatsApp Business, or manual operational queues.</p>
-          </div>
+        <div class="feature-card">
+          <span class="feature-num">04 / DISPATCH</span>
+          <h3 class="feature-name">Deterministic qualification</h3>
+          <p class="feature-desc">n8n enforces the 70-point qualification threshold, records the event in audit tables, and triggers notifications accordingly.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- CHAPTER 3: Technical architecture (The System Blueprint) -->
+  <!-- Technical Architecture Section -->
   <section class="arch-section" id="architecture" data-section="architecture">
     <div class="container">
-      <div class="section-chapter-tag light">
-        <span class="tag-dot"></span>
-        <span>Chapter 03 / System Architecture</span>
+      <div class="section-tag">
+        <span class="section-tag-index">03</span>
+        <span class="section-tag-sep">/</span>
+        <span>Request path</span>
       </div>
 
-      <h2 class="arch-title">One connected system.<br>Explicit responsibilities.</h2>
-      <p class="arch-intro">
-        From web entry to configured notifications, keep the handoffs visible and boundaries deterministic.
+      <h2 class="features-title">Each system has one dedicated responsibility.</h2>
+      <p class="features-intro">
+        The actual request path implemented by this application—no simulated mock components.
       </p>
 
       <div class="arch-bus-wrap">
-        <div class="arch-phase-labels">
-          <span>Signal</span>
-          <span>Intelligence</span>
-          <span>Action</span>
-        </div>
-
         <div class="arch-nodes-grid">
           <div class="arch-node">
-            <div class="arch-node-name">Web Form</div>
-            <div class="arch-node-role">Structured enquiry</div>
+            <div class="arch-node-name">Lead form</div>
+            <div class="arch-node-role">Collects intake fields</div>
           </div>
           <div class="arch-node">
-            <div class="arch-node-name">Caddy</div>
-            <div class="arch-node-role">Web entry / reverse proxy</div>
+            <div class="arch-node-name">Caddy reverse proxy</div>
+            <div class="arch-node-role">Serves form &amp; proxies webhook</div>
           </div>
           <div class="arch-node">
-            <div class="arch-node-name">n8n</div>
-            <div class="arch-node-role">Orchestration and routing</div>
+            <div class="arch-node-name">n8n intake webhook</div>
+            <div class="arch-node-role">Forwards payload to FastAPI</div>
           </div>
-          <div class="arch-node dark-hero">
-            <div class="arch-node-name">FastAPI</div>
-            <div class="arch-node-role">Validation &middot; business rules &middot; scoring</div>
+          <div class="arch-node highlight-node">
+            <div class="arch-node-name">FastAPI core</div>
+            <div class="arch-node-role">Validation &amp; scoring</div>
           </div>
           <div class="arch-node">
             <div class="arch-node-name">PostgreSQL</div>
-            <div class="arch-node-role">Persistent enquiry records</div>
+            <div class="arch-node-role">Persistent system of record</div>
           </div>
           <div class="arch-node">
-            <div class="arch-node-name">Scoring</div>
-            <div class="arch-node-role">Configurable LLM / fallback</div>
+            <div class="arch-node-name">n8n qualification</div>
+            <div class="arch-node-role">Applies score threshold (70)</div>
           </div>
           <div class="arch-node">
-            <div class="arch-node-name">Qualification</div>
-            <div class="arch-node-role">Qualified / not qualified / manual</div>
+            <div class="arch-node-name">Audit event log</div>
+            <div class="arch-node-role">Traceable execution history</div>
           </div>
           <div class="arch-node">
             <div class="arch-node-name">Notifications</div>
-            <div class="arch-node-role">WhatsApp &amp; Telegram dispatch</div>
+            <div class="arch-node-role">Configured communication channels</div>
           </div>
         </div>
 
         <div class="arch-fallback-pill">
-          IF LLM UNAVAILABLE &rarr; DETERMINISTIC FALLBACK
+          Deterministic fallback activates automatically when LLM scoring is unavailable
         </div>
       </div>
 
       <div class="arch-columns">
         <div>
-          <div class="arch-col-kicker">Intelligence / Deterministic by design</div>
+          <div class="arch-col-kicker">Intake and scoring</div>
           <p class="arch-col-text">
-            FastAPI applies validation, business rules and scoring. PostgreSQL holds persistent records. The LLM is configurable; deterministic fallback provides an alternative when model scoring is unavailable.
+            FastAPI validates contracts, rejects duplicates, stores verified records in PostgreSQL, and produces the intelligence score.
           </p>
         </div>
         <div>
-          <div class="arch-col-kicker">Action / Configuration sets the route</div>
+          <div class="arch-col-kicker">Workflow and operations</div>
           <p class="arch-col-text">
-            n8n orchestrates the workflow and routes qualification paths. Notifications use configured channels only; a route does not imply successful delivery.
+            n8n evaluates business rules, writes audit events, and dispatches downstream alerts. Downstream service outages do not affect intake acceptance.
           </p>
         </div>
       </div>
 
-      <span class="arch-footnote">Architecture design &mdash; verified with 97 automated tests and end-to-end rehearsal drills.</span>
+      <span class="arch-footnote">The form confirms intake acceptance; downstream notifications execute asynchronously.</span>
     </div>
   </section>
 
-  <!-- CHAPTER 4: Reliability and transparency (Operational Guarantees) -->
+  <!-- Reliability & Operational Limits -->
   <section class="rel-section" id="reliability" data-section="reliability">
     <div class="container">
-      <div class="section-chapter-tag light">
-        <span class="tag-dot"></span>
-        <span>Chapter 04 / Operational Resilience</span>
+      <div class="section-tag">
+        <span class="section-tag-index">04</span>
+        <span class="section-tag-sep">/</span>
+        <span>Operational behavior</span>
       </div>
 
       <div class="rel-grid">
         <div>
-          <h2 class="rel-title">Clarity includes what happens when it doesn&rsquo;t work.</h2>
+          <h2 class="rel-title">Production boundaries and operational expectations.</h2>
           <div class="rel-stance-card">
-            <div class="rel-stance-head">No silent assumptions.</div>
+            <div class="rel-stance-head">Working sandbox prototype</div>
             <p class="rel-stance-desc">
-              Handling principles implemented to prevent data loss, eliminate duplicate alerts, and guarantee auditability under stress.
+              This public demo operates on cloud sandbox environments. Instances may sleep when idle and require a brief wake period on the initial request. Use synthetic information only.
             </p>
           </div>
         </div>
 
         <div class="rel-principles-list">
           <div class="rel-principle-item">
-            <h3 class="principle-title">Input validation</h3>
-            <p class="principle-desc">Required information and format checks surface actionable field errors.</p>
-            <span class="principle-tag">CHECK THE INPUT</span>
+            <h3 class="principle-title">Authenticated internal API</h3>
+            <p class="principle-desc">Internal FastAPI endpoints require valid Bearer token authorization, rejecting unauthenticated traffic with HTTP 401.</p>
           </div>
 
           <div class="rel-principle-item">
-            <h3 class="principle-title">Duplicate handling</h3>
-            <p class="principle-desc">Potential matches are made explicit before a record is treated as new.</p>
-            <span class="principle-tag">PRESERVE CONTEXT</span>
+            <h3 class="principle-title">Predictable error semantics</h3>
+            <p class="principle-desc">Malformed submissions return HTTP 422 with field-level details. Duplicate submissions return HTTP 409 Conflict.</p>
           </div>
 
           <div class="rel-principle-item">
-            <h3 class="principle-title">Scoring fallback</h3>
-            <p class="principle-desc">Use deterministic rules when configured model scoring cannot provide a usable result.</p>
-            <span class="principle-tag">KEEP A FALLBACK</span>
+            <h3 class="principle-title">Scoring resilience</h3>
+            <p class="principle-desc">Leads receive scores even during provider outages through local fallback algorithms, ensuring intake never stalls.</p>
           </div>
 
           <div class="rel-principle-item">
-            <h3 class="principle-title">Explicit qualification paths</h3>
-            <p class="principle-desc">Represent qualified, not qualified and manual review as distinct possible routes.</p>
-            <span class="principle-tag">NAME THE NEXT STEP</span>
-          </div>
-
-          <div class="rel-principle-item">
-            <h3 class="principle-title">Observable workflow failures</h3>
-            <p class="principle-desc">Expose uncertain outcomes. Check records before retrying to avoid duplicates.</p>
-            <span class="principle-tag">DO NOT ASSUME DELIVERY</span>
+            <h3 class="principle-title">Synthetic data notice</h3>
+            <p class="principle-desc">Submissions are stored in the demo PostgreSQL database for testing and demonstration purposes.</p>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- CHAPTER 5: Next step CTA -->
+  <!-- Closing CTA Section -->
   <section class="cta-section" data-section="cta">
     <div class="container">
       <div class="cta-card">
-        <div class="section-chapter-tag light" style="margin-bottom: 16px;">
-          <span class="tag-dot"></span>
-          <span>Chapter 05 / Next Step</span>
-        </div>
-        <h2 class="cta-title">See what a better lead workflow looks like.</h2>
+        <div class="cta-kicker">Sandbox demonstration</div>
+        <h2 class="cta-title">Inspect the live intake pipeline.</h2>
         <p class="cta-desc">
-          Start with a test enquiry and explore how validation, scoring and routing fit together in a real deployment.
+          Submit an illustrative lead above to test schema validation, duplicate detection, and scoring in real time.
         </p>
-        <a href="#demo" class="btn-primary">Try the interactive demo &rarr;</a>
+        <a href="/demo" class="btn-primary" data-demo-cta>Open demo form &rarr;</a>
       </div>
     </div>
   </section>
 </main>
 
-<!-- Site Footer -->
+<!-- Site Footer per B10 -->
 <footer class="site-footer">
   <div class="container">
     <div class="footer-inner">
       <div class="footer-top">
-        <div class="footer-brand">
-          <a href="#hero" class="brand-identity" aria-label="LeadIntel Home">
-            <svg class="brand-logo-svg" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <rect x="1" y="1" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
-              <rect x="18" y="1" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
-              <rect x="18" y="18" width="9" height="9" rx="2" stroke="var(--blue-mark)" stroke-width="2"/>
+        <div>
+          <a href="/" class="brand-identity" id="footer-brand-home-link" aria-label="LeadIntel Home">
+            <svg class="brand-logo-svg" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect x="2" y="2" width="8" height="8" rx="2" fill="var(--accent-blue)"/>
+              <rect x="14" y="2" width="8" height="8" rx="2" fill="var(--brand-cube-color)"/>
+              <rect x="14" y="14" width="8" height="8" rx="2" fill="var(--accent-green)"/>
             </svg>
             <span class="brand-wordmark">LeadIntel</span>
           </a>
           <p class="footer-desc">
-            LeadIntel brings structured enquiry intake, scoring and qualification into one traceable, fault-tolerant workflow.
+            A real-time inbound lead intake, qualification, and routing prototype built with FastAPI, PostgreSQL, and n8n.
           </p>
         </div>
 
-        <nav class="footer-nav" aria-label="Footer Links">
-          <a href="#how-it-works" class="footer-link">How it works</a>
-          <a href="#demo" class="footer-link">Interactive demo</a>
-          <a href="#architecture" class="footer-link">Architecture</a>
-          <a href="#reliability" class="footer-link">Reliability</a>
+        <nav class="footer-nav" aria-label="Footer Navigation">
+          <a href="/demo" class="footer-link" data-demo-cta>Interactive demo</a>
+          <a href="#how-it-works" class="footer-link">Processing rules</a>
+          <a href="#architecture" class="footer-link">Request path</a>
+          <a href="#reliability" class="footer-link">Operational limits</a>
+          <a href="#hero" class="footer-link">Back to top &uarr;</a>
         </nav>
       </div>
 
       <div class="footer-bottom">
-        LeadIntel / Signal &rarr; Intelligence &rarr; Action
+        <span>LeadIntel &middot; Inbound Lead Intelligence Automation</span>
+        <span>FastAPI &middot; n8n &middot; Neon PostgreSQL &middot; Caddy</span>
       </div>
     </div>
   </div>
@@ -2072,10 +2548,7 @@ INTELLIGENCE
 <script src="config.js"></script>
 <script>
 /* =====================================================================
- * Demo lead form — configuration, telemetry, & interaction logic
- * =====================================================================
- * Webhook URL loaded from config.js (window.LEAD_FORM_CONFIG.webhookUrl).
- * Developer duplicate testing: ?external_id=<id>
+ * LeadIntel intake form
  * ===================================================================== */
 const CONFIG = {
   webhookUrl: (window.LEAD_FORM_CONFIG || {}).webhookUrl || "",
@@ -2083,6 +2556,28 @@ const CONFIG = {
 };
 
 const DEV_EXTERNAL_ID = new URLSearchParams(window.location.search).get("external_id");
+
+// Fictional test presets
+const PRESETS = {
+  enterprise: {
+    name: "Jamie Example",
+    email: "jamie@example.com",
+    company: "Example Systems",
+    message: "We are evaluating a demo and pricing for an enterprise lead-intake workflow. We would like to discuss an integration this quarter."
+  },
+  discovery: {
+    name: "Taylor Example",
+    email: "taylor@example.com",
+    company: "Example Studio",
+    message: "Exploring workflow automation solutions for our intake forms. Would love to review your security architecture and audit capabilities before starting."
+  },
+  spam: {
+    name: "Casey Example",
+    email: "casey@example.com",
+    company: "Example Office",
+    message: "Hello, I would like to learn more."
+  }
+};
 
 const form = document.getElementById("lead-form");
 const banner = document.getElementById("banner");
@@ -2094,35 +2589,99 @@ const statusBlockDesc = document.getElementById("status-block-desc");
 const statusStateLabel = document.getElementById("status-state-label");
 const statusDetails = document.getElementById("status-details");
 const detailsToggle = document.getElementById("details-toggle");
+const detailsArrow = document.getElementById("details-arrow");
+const telemetryTitle = document.getElementById("telemetry-title");
+const telemetryCopyBtn = document.getElementById("telemetry-copy-btn");
+const latencyBadge = document.getElementById("latency-badge");
+const latencyText = document.getElementById("latency-text");
+const themeToggleBtn = document.getElementById("theme-toggle-btn");
+
+const outcomePanel = document.getElementById("outcome-panel");
+const outcomeIcon = document.getElementById("outcome-icon");
+const outcomeTitle = document.getElementById("outcome-title");
+const outcomeSub = document.getElementById("outcome-sub");
+const outcomeExtId = document.getElementById("outcome-ext-id");
+const scoreGaugeVal = document.getElementById("score-gauge-val");
+const scoreProgressBar = document.getElementById("score-progress-bar");
+const scoreReasonText = document.getElementById("score-reason-text");
+const outcomeTestDupBtn = document.getElementById("outcome-test-dup-btn");
+const outcomeResetBtn = document.getElementById("outcome-reset-btn");
 
 const destManual = document.getElementById("dest-manual");
 const destUnqualified = document.getElementById("dest-unqualified");
 const destQualified = document.getElementById("dest-qualified");
 
+const messageInput = document.getElementById("message");
+const charCounter = document.getElementById("message-char-count");
+
 const mobileMenuBtn = document.getElementById("mobile-menu-btn");
 const mobileDrawer = document.getElementById("mobile-drawer");
 const readingProgressBar = document.getElementById("reading-progress");
 
-/* Reading Progress Bar Scroll Handler */
-function updateReadingProgress() {
-  const scrollTop = window.scrollY || document.documentElement.scrollTop;
-  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
-  if (docHeight > 0 && readingProgressBar) {
-    const progress = Math.min(Math.max(scrollTop / docHeight, 0), 1);
-    readingProgressBar.style.transform = `scaleX(${progress})`;
+let currentExternalId = null;
+let lastSubmittedPayload = null;
+let lastResponseData = null;
+let isSubmitting = false;
+const FIELDS = ["name", "email", "company", "message"];
+
+/* =====================================================================
+ * Theme Switcher: Default is dark, with persistent light mode option
+ * ===================================================================== */
+const THEME_STORAGE_KEY = "leadintel-theme";
+
+function applyTheme(theme) {
+  if (theme === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+    if (themeToggleBtn) {
+      themeToggleBtn.setAttribute("title", "Switch to dark theme");
+      themeToggleBtn.setAttribute("aria-label", "Switch to dark theme");
+    }
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+    if (themeToggleBtn) {
+      themeToggleBtn.setAttribute("title", "Switch to light theme");
+      themeToggleBtn.setAttribute("aria-label", "Switch to light theme");
+    }
   }
 }
-window.addEventListener("scroll", updateReadingProgress, { passive: true });
 
-/* Mobile Drawer Menu Toggle */
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener("click", function() {
+    const isLight = document.documentElement.getAttribute("data-theme") === "light";
+    const nextTheme = isLight ? "dark" : "light";
+    applyTheme(nextTheme);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    } catch (e) {}
+  });
+}
+
+/* Reading progress bar throttled via requestAnimationFrame per B7 */
+let ticking = false;
+function onScroll() {
+  if (!ticking) {
+    window.requestAnimationFrame(function() {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+      if (docHeight > 0 && readingProgressBar) {
+        const progress = Math.min(Math.max(scrollTop / docHeight, 0), 1);
+        readingProgressBar.style.transform = `scaleX(${progress})`;
+      }
+      ticking = false;
+    });
+    ticking = true;
+  }
+}
+window.addEventListener("scroll", onScroll, { passive: true });
+
+/* Mobile drawer toggle */
 if (mobileMenuBtn && mobileDrawer) {
   mobileMenuBtn.addEventListener("click", function() {
     const isExpanded = mobileMenuBtn.getAttribute("aria-expanded") === "true";
-    mobileMenuBtn.setAttribute("aria-expanded", !isExpanded);
+    mobileMenuBtn.setAttribute("aria-expanded", String(!isExpanded));
     mobileDrawer.classList.toggle("open", !isExpanded);
   });
 
-  // Close drawer when any link clicked
   mobileDrawer.querySelectorAll("a").forEach(function(link) {
     link.addEventListener("click", function() {
       mobileMenuBtn.setAttribute("aria-expanded", "false");
@@ -2130,7 +2689,6 @@ if (mobileMenuBtn && mobileDrawer) {
     });
   });
 
-  // Close drawer on Escape key
   document.addEventListener("keydown", function(e) {
     if (e.key === "Escape" && mobileDrawer.classList.contains("open")) {
       mobileMenuBtn.setAttribute("aria-expanded", "false");
@@ -2140,17 +2698,11 @@ if (mobileMenuBtn && mobileDrawer) {
   });
 }
 
-/* ScrollSpy for Active Section Navigation */
+/* ScrollSpy for active nav items */
 const sections = document.querySelectorAll("main > section[id]");
 const navLinks = document.querySelectorAll(".desktop-nav .nav-link, .mobile-nav-link");
 
 if ("IntersectionObserver" in window && sections.length > 0) {
-  const observerOptions = {
-    root: null,
-    rootMargin: "-20% 0px -60% 0px",
-    threshold: 0
-  };
-
   const sectionObserver = new IntersectionObserver(function(entries) {
     entries.forEach(function(entry) {
       if (entry.isIntersecting) {
@@ -2164,83 +2716,185 @@ if ("IntersectionObserver" in window && sections.length > 0) {
         });
       }
     });
-  }, observerOptions);
+  }, { root: null, rootMargin: "-20% 0px -60% 0px", threshold: 0 });
 
   sections.forEach(function(s) { sectionObserver.observe(s); });
 }
 
-/* Details Toggle for Telemetry JSON */
+/* Tagline word-by-word reveal per B11 */
+const taglineTarget = document.getElementById("tagline-reveal-target");
+if (taglineTarget) {
+  const words = taglineTarget.innerText.trim().split(/\s+/);
+  taglineTarget.innerHTML = words.map(function(word) {
+    return `<span class="reveal-word">${word}</span>`;
+  }).join(" ");
+
+  const revealWords = taglineTarget.querySelectorAll(".reveal-word");
+  if ("IntersectionObserver" in window) {
+    const taglineObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          revealWords.forEach(function(span, idx) {
+            setTimeout(function() {
+              span.classList.add("active");
+            }, idx * 75);
+          });
+        }
+      });
+    }, { threshold: 0.35 });
+    taglineObserver.observe(taglineTarget);
+  } else {
+    revealWords.forEach(function(span) { span.classList.add("active"); });
+  }
+}
+
+/* Character counter */
+if (messageInput && charCounter) {
+  messageInput.addEventListener("input", function() {
+    const len = messageInput.value.length;
+    charCounter.textContent = `${len} / 500`;
+    charCounter.style.color = len > 450 ? "var(--accent-orange)" : "var(--text-dim)";
+  });
+}
+
+/* Telemetry copy */
+if (telemetryCopyBtn && payloadPreview) {
+  telemetryCopyBtn.addEventListener("click", function() {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      telemetryCopyBtn.textContent = "Copy unavailable";
+      return;
+    }
+    navigator.clipboard.writeText(payloadPreview.textContent).then(function() {
+      const orig = telemetryCopyBtn.textContent;
+      telemetryCopyBtn.textContent = "✓ Copied!";
+      setTimeout(function() { telemetryCopyBtn.textContent = orig; }, 1800);
+    }).catch(function() {
+      telemetryCopyBtn.textContent = "Error copying";
+    });
+  });
+}
+
+/* Details toggle */
 if (detailsToggle && statusDetails) {
   detailsToggle.addEventListener("click", function() {
     const isOpen = statusDetails.style.display === "block";
     statusDetails.style.display = isOpen ? "none" : "block";
-    detailsToggle.textContent = isOpen ? "View payload telemetry \u2193" : "Hide payload telemetry \u2191";
+    detailsToggle.setAttribute("aria-expanded", String(!isOpen));
+    detailsArrow.innerHTML = isOpen ? "&darr;" : "&uarr;";
   });
 }
 
-/* Missing Webhook Config Warning Banner */
+/* Missing config banner */
 if (!CONFIG.webhookUrl) {
   const configBanner = document.getElementById("config-banner");
-  configBanner.textContent =
-    "This form is not configured correctly (config.js is missing its webhook URL). " +
-    "Please contact the site operator.";
+  configBanner.textContent = "This form is not configured correctly (config.js is missing its webhook URL). Please contact the site operator.";
   configBanner.hidden = false;
-  console.error("[lead-form] LEAD_FORM_CONFIG.webhookUrl is missing — check config.js");
+  submitBtn.disabled = true;
+  submitLabel.textContent = "Demo unavailable";
 }
-
-const FIELDS = ["name", "email", "company", "message"];
-let currentExternalId = null;
 
 function mintExternalId() {
   if (DEV_EXTERNAL_ID) return DEV_EXTERNAL_ID;
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
     return window.crypto.randomUUID();
   }
-  return "demo-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
+  return "demo-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
 }
 
-function updateTelemetryPreview() {
-  const extId = currentExternalId || DEV_EXTERNAL_ID || "demo-" + (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID().slice(0, 8) : "live");
+function updateTelemetryPreview(customData, title) {
+  const extId = currentExternalId || DEV_EXTERNAL_ID || "ready";
   if (externalIdBadge) {
-    externalIdBadge.textContent = "ID: " + extId.slice(0, 14) + "...";
+    externalIdBadge.textContent = "ID: " + (extId.length > 14 ? extId.slice(0, 14) + "…" : extId);
   }
   if (!payloadPreview) return;
+
+  if (title && telemetryTitle) {
+    telemetryTitle.textContent = title;
+  }
+
+  if (customData) {
+    payloadPreview.textContent = JSON.stringify(customData, null, 2);
+    return;
+  }
+
   const preview = {
-    name: (document.getElementById("name").value || "Alex Morgan").trim(),
-    email: (document.getElementById("email").value || "alex@company.com").trim(),
-    company: (document.getElementById("company").value || "Northline").trim(),
-    message: (document.getElementById("message").value || "Exploring automated qualification for enterprise inbound.").trim(),
+    name: (document.getElementById("name").value || "Jamie Example").trim(),
+    email: (document.getElementById("email").value || "jamie@example.com").trim(),
+    company: (document.getElementById("company").value || "Example Systems").trim(),
+    message: (document.getElementById("message").value || "Evaluating automated qualification for inbound leads.").trim(),
     source: CONFIG.source,
     external_id: extId
   };
   payloadPreview.textContent = JSON.stringify(preview, null, 2);
 }
 
-/* Interactive coupling between form fields and processing rail steps */
-function highlightRailStep(stepNumber) {
-  for (let i = 1; i <= 4; i++) {
-    const stepEl = document.getElementById("rail-step-" + i);
-    if (stepEl) {
-      if (i === stepNumber) {
-        stepEl.classList.add("active");
-      } else {
-        stepEl.classList.remove("active");
-      }
-    }
+function loadPreset(key) {
+  const p = PRESETS[key];
+  if (!p) return;
+  currentExternalId = null;
+  document.getElementById("name").value = p.name;
+  document.getElementById("email").value = p.email;
+  document.getElementById("company").value = p.company;
+  document.getElementById("message").value = p.message;
+
+  if (charCounter) {
+    charCounter.textContent = `${p.message.length} / 500`;
   }
+
+  document.querySelectorAll(".preset-chip").forEach(function(chip) {
+    chip.classList.toggle("active", chip.getAttribute("data-persona") === key);
+  });
+
+  clearAllErrors();
+  updateTelemetryPreview();
 }
+
+document.getElementById("preset-enterprise").addEventListener("click", function() { loadPreset("enterprise"); });
+document.getElementById("preset-discovery").addEventListener("click", function() { loadPreset("discovery"); });
+document.getElementById("preset-spam").addEventListener("click", function() { loadPreset("spam"); });
+
+document.getElementById("preset-clear-btn").addEventListener("click", function() {
+  currentExternalId = null;
+  form.reset();
+  if (charCounter) charCounter.textContent = "0 / 500";
+  document.querySelectorAll(".preset-chip").forEach(function(c) { c.classList.remove("active"); });
+  clearAllErrors();
+  updateTelemetryPreview();
+  resetRailHighlights();
+});
+
+document.getElementById("preset-duplicate").addEventListener("click", function() {
+  if (lastSubmittedPayload) {
+    currentExternalId = lastSubmittedPayload.external_id;
+    document.getElementById("name").value = lastSubmittedPayload.name;
+    document.getElementById("email").value = lastSubmittedPayload.email;
+    document.getElementById("company").value = lastSubmittedPayload.company;
+    document.getElementById("message").value = lastSubmittedPayload.message;
+    banner.textContent = "Loaded previous external ID (" + currentExternalId.slice(0, 12) + "…) to test duplicate rejection.";
+    banner.className = "form-banner";
+    banner.style.display = "block";
+    banner.style.background = "var(--accent-orange-bg)";
+    banner.style.color = "var(--accent-orange)";
+    banner.style.border = "1px solid rgba(194,65,12,0.3)";
+  } else {
+    loadPreset("enterprise");
+    currentExternalId = "test-dup-" + (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID().slice(0, 8) : "demo");
+    banner.textContent = "Locked test external ID. Submit once to create, then re-submit to test 409 rejection.";
+    banner.className = "form-banner";
+    banner.style.display = "block";
+    banner.style.background = "var(--bg-surface-2)";
+    banner.style.color = "var(--text-primary)";
+    banner.style.border = "1px solid var(--border-default)";
+  }
+  updateTelemetryPreview();
+});
 
 FIELDS.forEach(function(f) {
   const el = document.getElementById(f);
   if (el) {
     el.addEventListener("input", function() {
+      currentExternalId = null;
       updateTelemetryPreview();
-      const step = parseInt(el.getAttribute("data-rail-step"), 10) || 1;
-      highlightRailStep(step);
-    });
-    el.addEventListener("focus", function() {
-      const step = parseInt(el.getAttribute("data-rail-step"), 10) || 1;
-      highlightRailStep(step);
     });
   }
 });
@@ -2253,10 +2907,12 @@ function setFieldError(fieldName, message) {
   if (!wrap || !input || !errorEl) return;
   if (message) {
     wrap.classList.add("invalid");
+    wrap.classList.remove("valid");
     input.setAttribute("aria-invalid", "true");
     errorEl.textContent = message;
   } else {
     wrap.classList.remove("invalid");
+    wrap.classList.add("valid");
     input.removeAttribute("aria-invalid");
     errorEl.textContent = "";
   }
@@ -2265,7 +2921,15 @@ function setFieldError(fieldName, message) {
 function clearAllErrors() {
   banner.textContent = "";
   banner.className = "form-banner";
-  FIELDS.forEach(function(f) { setFieldError(f, null); });
+  banner.style.display = "none";
+  FIELDS.forEach(function(f) {
+    const wrap = document.getElementById("field-" + f);
+    const input = document.getElementById(f);
+    const errorEl = document.getElementById(f + "-error");
+    if (wrap) { wrap.classList.remove("invalid"); wrap.classList.remove("valid"); }
+    if (input) input.removeAttribute("aria-invalid");
+    if (errorEl) errorEl.textContent = "";
+  });
 }
 
 function validateForm() {
@@ -2276,7 +2940,7 @@ function validateForm() {
     let error = "";
     if (!value) {
       error = f === "message"
-        ? "Please tell us how we can help."
+        ? "Please describe your requirements."
         : "This field is required.";
     } else if (f === "email" && !el.validity.valid) {
       error = "Please enter a valid email address.";
@@ -2290,6 +2954,7 @@ function validateForm() {
 
 function renderValidationErrors(detail) {
   let any = false;
+  let firstInvalid = null;
   if (Array.isArray(detail)) {
     detail.forEach(function(err) {
       const field = Array.isArray(err.loc) ? err.loc[err.loc.length - 1] : null;
@@ -2297,12 +2962,14 @@ function renderValidationErrors(detail) {
         setFieldError(field, field === "email"
           ? "Please enter a valid email address."
           : "Please check this field.");
+        if (!firstInvalid) firstInvalid = document.getElementById(field);
         any = true;
       }
     });
   }
-  banner.textContent = any ? "Please check the highlighted fields and try again." : "Validation failed. Please verify your enquiry.";
+  banner.textContent = any ? "Please correct highlighted fields and resubmit." : "Validation failed. Please verify your enquiry.";
   banner.className = "form-banner error";
+  if (firstInvalid) firstInvalid.focus();
 }
 
 function resetRailHighlights() {
@@ -2311,85 +2978,136 @@ function resetRailHighlights() {
   });
   for (let i = 1; i <= 4; i++) {
     const stepEl = document.getElementById("rail-step-" + i);
-    if (stepEl) stepEl.classList.remove("active");
+    if (stepEl) {
+      stepEl.classList.remove("active");
+    }
   }
   statusStateLabel.textContent = "Awaiting submission";
   statusStateLabel.className = "status-state-tag";
-  statusBlockDesc.textContent = "No result yet. When you submit a test lead, the pipeline records the enquiry, executes qualification scoring, and surfaces the routed outcome.";
+  statusBlockDesc.textContent = "After the API returns HTTP 201, n8n executes qualification logic and writes the audit event.";
   if (statusDetails) statusDetails.style.display = "none";
+  if (detailsToggle) detailsToggle.setAttribute("aria-expanded", "false");
+  if (outcomePanel) outcomePanel.classList.remove("visible");
+  form.style.display = "block";
 }
 
-function highlightOutcome(outcome, leadData) {
-  resetRailHighlights();
-  if (statusDetails) statusDetails.style.display = "block";
+function highlightOutcome(outcome, data, latencyMs) {
+  if (latencyBadge && latencyMs !== undefined) {
+    latencyText.textContent = `Response time: ${latencyMs}ms`;
+    latencyBadge.style.color = outcome === "created"
+      ? "var(--accent-green)"
+      : outcome === "duplicate" ? "var(--accent-orange)" : "var(--accent-red)";
+  }
+
+  [destManual, destUnqualified, destQualified].forEach(function(el) {
+    if (el) el.classList.remove("selected");
+  });
+
+  const leadInfo = (data && data.lead) || {};
+  const score = leadInfo.score !== undefined && leadInfo.score !== null ? leadInfo.score : (data && data.score);
+  const scoreReason = leadInfo.score_reason || (data && data.score_reason) || "";
+  const extId = (data && data.lead && data.lead.external_id) || (lastSubmittedPayload && lastSubmittedPayload.external_id) || currentExternalId || "N/A";
+
+  outcomePanel.classList.add("visible");
+  if (outcomeExtId) outcomeExtId.textContent = "ID: " + (extId.length > 14 ? extId.slice(0, 14) + "…" : extId);
 
   if (outcome === "created") {
-    const score = leadData && leadData.lead && leadData.lead.score !== null ? leadData.lead.score : null;
-    let destLabel = "Processed";
-    if (score !== null) {
-      if (score >= 70) {
-        destQualified.classList.add("selected");
-        destLabel = "Qualified (Score " + score + "/100)";
-      } else if (score < 40) {
-        destUnqualified.classList.add("selected");
-        destLabel = "Not qualified (Score " + score + "/100)";
-      } else {
-        destManual.classList.add("selected");
-        destLabel = "Manual review (Score " + score + "/100)";
-      }
-    } else {
+    outcomeIcon.className = "outcome-status-icon success";
+    outcomeIcon.textContent = "✓";
+    outcomeTitle.textContent = "Enquiry accepted";
+    outcomeSub.textContent = "HTTP 201 from intake workflow";
+
+    const numScore = Number.isInteger(score) && score >= 0 && score <= 100 ? score : null;
+    scoreGaugeVal.textContent = numScore === null ? "Not returned" : String(numScore);
+    scoreReasonText.textContent = scoreReason || (
+      numScore === null
+        ? "No score was returned. This submission requires manual review."
+        : "FastAPI produced a score without an explanation."
+    );
+
+    scoreProgressBar.className = "score-progress-bar";
+    scoreProgressBar.style.width = numScore === null ? "0%" : numScore + "%";
+    if (numScore === null) {
       destManual.classList.add("selected");
-      destLabel = "Persisted & Queued";
+      statusStateLabel.textContent = "Manual review (no score)";
+      statusStateLabel.className = "status-state-tag";
+    } else if (numScore >= 70) {
+      destQualified.classList.add("selected");
+      scoreProgressBar.classList.add("qualified");
+      statusStateLabel.textContent = `Qualified (Score ${numScore}/100)`;
+      statusStateLabel.className = "status-state-tag created";
+    } else {
+      destUnqualified.classList.add("selected");
+      scoreProgressBar.classList.add("unqualified");
+      statusStateLabel.textContent = `Not Qualified (Score ${numScore}/100)`;
+      statusStateLabel.className = "status-state-tag";
     }
 
-    statusStateLabel.textContent = "Created: " + destLabel;
-    statusStateLabel.className = "status-state-tag created";
-    statusBlockDesc.textContent = "Lead intake successful. Persisted to PostgreSQL, scored, and routed through configured notification channels.";
-    if (payloadPreview) {
-      payloadPreview.textContent = JSON.stringify(leadData, null, 2);
+    for (let i = 1; i <= 4; i++) {
+      const step = document.getElementById("rail-step-" + i);
+      if (step) step.classList.add("active");
     }
+
+    statusBlockDesc.textContent = "FastAPI accepted and stored the lead record. n8n continues qualification and any configured notifications asynchronously.";
+    updateTelemetryPreview(data, "API response · 201 Created");
   } else if (outcome === "duplicate") {
-    statusStateLabel.textContent = "Duplicate Rejected (409)";
+    outcomeIcon.className = "outcome-status-icon duplicate";
+    outcomeIcon.textContent = "!";
+    outcomeTitle.textContent = "Duplicate Ingestion Blocked (409)";
+    outcomeSub.textContent = "Composite external_id constraint enforced";
+
+    scoreGaugeVal.textContent = "—";
+    scoreProgressBar.style.width = "0%";
+    scoreReasonText.textContent = "The API rejected this source and external ID pair; no duplicate lead was created.";
+
+    statusStateLabel.textContent = "Duplicate Rejected (409 Conflict)";
     statusStateLabel.className = "status-state-tag duplicate";
-    statusBlockDesc.textContent = "Duplicate external ID detected. The system preserved the existing record and rejected redundant re-ingestion.";
-    if (payloadPreview && leadData) {
-      payloadPreview.textContent = JSON.stringify(leadData, null, 2);
-    }
+    statusBlockDesc.textContent = "The same source and external ID were already accepted. The API returned HTTP 409 Conflict.";
+
+    const s1 = document.getElementById("rail-step-1");
+    const s2 = document.getElementById("rail-step-2");
+    if (s1) s1.classList.add("active");
+    if (s2) s2.classList.add("active");
+
+    updateTelemetryPreview(data, "API response · 409 Conflict");
   } else {
-    statusStateLabel.textContent = "Error: " + outcome;
+    outcomeIcon.className = "outcome-status-icon";
+    outcomeIcon.style.background = "var(--accent-red-bg)";
+    outcomeIcon.style.color = "var(--accent-red)";
+    outcomeIcon.textContent = "!";
+    outcomeTitle.textContent = "Pipeline Error (" + outcome + ")";
+    outcomeSub.textContent = "The intake result could not be confirmed";
+    scoreGaugeVal.textContent = "—";
+    scoreProgressBar.style.width = "0%";
+    scoreReasonText.textContent = "No score is available for this response.";
+
+    statusStateLabel.textContent = "Pipeline Error";
     statusStateLabel.className = "status-state-tag error";
-    statusBlockDesc.textContent = "The pipeline returned an unexpected status code. Check network connection or webhook URL.";
+    statusBlockDesc.textContent = "The service did not confirm acceptance. If retried, duplicate protection may return HTTP 409.";
+    updateTelemetryPreview(data, "Response details");
   }
+
+  if (statusDetails) statusDetails.style.display = "block";
+  if (detailsArrow) detailsArrow.innerHTML = "&uarr;";
 }
 
-function showPanel(panel) {
-  form.style.display = "none";
-  panel.classList.add("visible");
-  panel.focus();
-}
-
-function resetToForm() {
-  clearAllErrors();
-  form.reset();
-  currentExternalId = null;
-  document.querySelectorAll(".outcome-panel").forEach(function(p) { p.classList.remove("visible"); });
-  form.style.display = "block";
-  resetRailHighlights();
-  updateTelemetryPreview();
-  document.getElementById("name").focus();
-}
-
-function setSubmitting(isSubmitting) {
-  submitBtn.disabled = isSubmitting;
-  submitBtn.classList.toggle("submitting", isSubmitting);
-  submitLabel.textContent = isSubmitting ? "Submitting\u2026" : "Submit test lead";
+function setSubmitting(submitting) {
+  isSubmitting = submitting;
+  submitBtn.disabled = submitting;
+  form.setAttribute("aria-busy", String(submitting));
+  submitBtn.classList.toggle("submitting", submitting);
+  submitLabel.textContent = submitting ? "Sending to intake…" : "Send demo enquiry →";
 }
 
 async function handleSubmit(event) {
-  event.preventDefault();
+  if (event) event.preventDefault();
+  if (isSubmitting) return;
   clearAllErrors();
   if (!CONFIG.webhookUrl) return;
   if (!validateForm()) return;
+
+  const extId = currentExternalId || mintExternalId();
+  currentExternalId = extId;
 
   const payload = {
     name: document.getElementById("name").value.trim(),
@@ -2397,57 +3115,234 @@ async function handleSubmit(event) {
     company: document.getElementById("company").value.trim(),
     message: document.getElementById("message").value.trim(),
     source: CONFIG.source,
-    external_id: (currentExternalId = currentExternalId || mintExternalId()),
+    external_id: extId,
   };
 
+  lastSubmittedPayload = Object.assign({}, payload);
   setSubmitting(true);
+
+  const startTime = performance.now();
   let res;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(function() { controller.abort(); }, 120000);
   try {
     res = await fetch(CONFIG.webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
   } catch (err) {
+    window.clearTimeout(timeoutId);
     setSubmitting(false);
-    console.warn("[lead-form] network error reaching webhook:", err);
-    banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
+    const latency = Math.round(performance.now() - startTime);
+    console.warn("[lead-form] intake request did not receive a response:", err);
+    banner.textContent = "No response was received from the intake service. It may still be waking up. Retry with the same demo enquiry—if already saved, duplicate protection may return 409.";
     banner.className = "form-banner error";
-    highlightOutcome("Network failure", null);
+    highlightOutcome("Network failure", { error: err.message }, latency);
     return;
   }
+  window.clearTimeout(timeoutId);
 
+  const latency = Math.round(performance.now() - startTime);
   let data = null;
-  try { data = await res.json(); } catch (err) { /* non-JSON response */ }
+  try { data = await res.json(); } catch (err) { /* non-JSON */ }
   setSubmitting(false);
+  lastResponseData = data;
   console.log("[lead-form] response:", res.status, data && data.outcome);
 
-  if (res.ok && data && data.outcome === "created") {
-    highlightOutcome("created", data);
-    currentExternalId = null;
-    showPanel(document.getElementById("success-panel"));
+  if (res.status === 201 && data && data.outcome === "created" && data.lead) {
+    highlightOutcome("created", data, latency);
   } else if (res.status === 409 || (data && data.outcome === "duplicate")) {
-    highlightOutcome("duplicate", data);
-    currentExternalId = null;
-    showPanel(document.getElementById("duplicate-panel"));
+    highlightOutcome("duplicate", data, latency);
   } else if (res.status === 422 || (data && data.outcome === "validation_failed")) {
     renderValidationErrors(data && data.detail);
-    document.getElementById("name").focus();
   } else if (res.status === 502 || (data && data.outcome === "upstream_error")) {
-    banner.textContent = "Upstream service error. Please try again shortly.";
+    banner.textContent = "The intake service could not complete this request. Please try again shortly.";
     banner.className = "form-banner error";
-    highlightOutcome("Upstream 502", data);
+    highlightOutcome("Upstream 502", data, latency);
   } else {
-    console.warn("[lead-form] unexpected response:", res.status, data);
-    banner.textContent = "We couldn\u2019t submit your request right now. Please try again.";
+    banner.textContent = "Request completed with status " + res.status + ".";
     banner.className = "form-banner error";
-    highlightOutcome("HTTP " + res.status, data);
+    highlightOutcome("HTTP " + res.status, data, latency);
   }
 }
 
 form.addEventListener("submit", handleSubmit);
-document.getElementById("success-reset").addEventListener("click", resetToForm);
-document.getElementById("duplicate-reset").addEventListener("click", resetToForm);
+
+outcomeResetBtn.addEventListener("click", function() {
+  currentExternalId = null;
+  resetRailHighlights();
+  form.reset();
+  if (charCounter) charCounter.textContent = "0 / 500";
+  document.querySelectorAll(".preset-chip").forEach(function(c) { c.classList.remove("active"); });
+  clearAllErrors();
+  updateTelemetryPreview();
+  document.getElementById("name").focus();
+});
+
+outcomeTestDupBtn.addEventListener("click", function() {
+  if (lastSubmittedPayload) {
+    FIELDS.forEach(function(field) {
+      document.getElementById(field).value = lastSubmittedPayload[field];
+    });
+    currentExternalId = lastSubmittedPayload.external_id;
+    handleSubmit();
+  }
+});
+
+/* =====================================================================
+ * Route & Page Separation: Landing View vs Dedicated Demo View
+ * ===================================================================== */
+function isCleanRouteEnvironment() {
+  return window.location.protocol !== "file:" && window.location.port !== "5500";
+}
+
+function getHomeUrl() {
+  return isCleanRouteEnvironment() ? "/" : "#";
+}
+
+function getDemoUrl() {
+  return isCleanRouteEnvironment() ? "/demo" : "#demo";
+}
+
+function isDemoRoute() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("view") === "demo" || window.location.hash === "#demo") {
+    return true;
+  }
+  if (isCleanRouteEnvironment()) {
+    const cleanPath = window.location.pathname.replace(/\/$/, "");
+    return cleanPath === "/demo";
+  }
+  return false;
+}
+
+function scrollToTopInstant() {
+  window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  if (document.documentElement) document.documentElement.scrollTop = 0;
+  if (document.body) document.body.scrollTop = 0;
+}
+
+function updateView(isDemo, pushStateUrl, options) {
+  options = options || {};
+
+  if (pushStateUrl && window.location.protocol !== "file:") {
+    if (isCleanRouteEnvironment()) {
+      if (window.location.pathname !== pushStateUrl) {
+        history.pushState({ view: isDemo ? "demo" : "landing" }, "", pushStateUrl);
+      }
+    } else {
+      if (pushStateUrl.startsWith("#") || pushStateUrl === "") {
+        window.location.hash = pushStateUrl.replace(/^#/, "");
+      } else {
+        history.pushState({ view: isDemo ? "demo" : "landing" }, "", pushStateUrl);
+      }
+    }
+  } else if (pushStateUrl && window.location.protocol === "file:") {
+    window.location.hash = isDemo ? "demo" : "";
+  }
+
+  document.documentElement.setAttribute("data-view", isDemo ? "demo" : "landing");
+
+  // Close mobile drawer if open
+  if (mobileDrawer && mobileDrawer.classList.contains("open") && mobileMenuBtn) {
+    mobileMenuBtn.setAttribute("aria-expanded", "false");
+    mobileDrawer.classList.remove("open");
+  }
+
+  if (isDemo) {
+    scrollToTopInstant();
+    const nameInput = document.getElementById("name");
+    if (nameInput) {
+      setTimeout(function() {
+        nameInput.focus({ preventScroll: true });
+      }, 150);
+    }
+  } else {
+    // If popstate provided a saved scroll position, restore it
+    if (options.isPopState && typeof options.savedScrollY === "number") {
+      window.scrollTo({ top: options.savedScrollY, behavior: "instant" });
+    } else if (options.resetScroll || (!window.location.hash || window.location.hash === "#" || window.location.hash === "#hero")) {
+      scrollToTopInstant();
+    } else if (window.location.hash && window.location.hash !== "#demo") {
+      const target = document.querySelector(window.location.hash);
+      if (target) {
+        setTimeout(function() {
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 50);
+      }
+    } else {
+      scrollToTopInstant();
+    }
+  }
+}
+
+function renderRoute(options) {
+  updateView(isDemoRoute(), null, options);
+}
+
+// Connect all demo CTAs
+document.querySelectorAll("[data-demo-cta]").forEach(function(link) {
+  link.addEventListener("click", function(e) {
+    if (document.documentElement.getAttribute("data-view") === "demo" && (link.classList.contains("btn-header") || link.closest(".mobile-drawer"))) {
+      e.preventDefault();
+      updateView(false, getHomeUrl(), { resetScroll: true });
+      return;
+    }
+    e.preventDefault();
+    // Save current landing scroll position before opening demo
+    if (history.replaceState) {
+      history.replaceState({ view: "landing", scrollY: window.scrollY || document.documentElement.scrollTop || 0 }, "");
+    }
+    updateView(true, getDemoUrl());
+  });
+});
+
+// Connect return-to-home links
+document.querySelectorAll("#brand-home-link, #footer-brand-home-link, #demo-back-btn").forEach(function(link) {
+  link.addEventListener("click", function(e) {
+    e.preventDefault();
+    updateView(false, getHomeUrl(), { resetScroll: true });
+  });
+});
+
+// Connect section anchor links while in demo view
+document.querySelectorAll('.desktop-nav a[href^="#"], .mobile-drawer a[href^="#"], .footer-nav a[href^="#"]').forEach(function(link) {
+  link.addEventListener("click", function(e) {
+    const hash = link.getAttribute("href");
+    if (hash === "#demo") return;
+    if (document.documentElement.getAttribute("data-view") === "demo") {
+      e.preventDefault();
+      const targetUrl = isCleanRouteEnvironment() ? "/" + hash : hash;
+      updateView(false, targetUrl);
+    }
+  });
+});
+
+// Handle browser Back / Forward navigation
+window.addEventListener("popstate", function(event) {
+  const isDemo = isDemoRoute();
+  const savedScrollY = (event.state && typeof event.state.scrollY === "number") ? event.state.scrollY : undefined;
+  renderRoute({ isPopState: true, savedScrollY: savedScrollY });
+});
+
+// Handle hashchange
+window.addEventListener("hashchange", function() {
+  renderRoute();
+});
+
+// Guarantee initial fresh load of landing starts at the top
+window.addEventListener("load", function() {
+  if (!isDemoRoute() && (!window.location.hash || window.location.hash === "#" || window.location.hash === "#hero")) {
+    if (!history.state || typeof history.state.scrollY !== "number") {
+      scrollToTopInstant();
+    }
+  }
+});
+
+// Initial route render
+renderRoute();
 </script>
 </body>
 </html>

@@ -171,7 +171,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ outcome: 'created', apiStatus: $json.statusCode, lead: $json.body }) }}",
+        "responseBody": "={{ JSON.stringify({ outcome: 'created', apiStatus: $json.statusCode, lead: $json.body, score: ($json.body && $json.body.score), score_reason: ($json.body && $json.body.score_reason) }) }}",
         "options": {
           "responseCode": 201
         }
@@ -188,7 +188,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ outcome: 'duplicate', apiStatus: $json.statusCode, detail: ($json.body && $json.body.detail) || 'A lead with this source and external_id already exists' }) }}",
+        "responseBody": "={{ JSON.stringify({ outcome: 'duplicate', apiStatus: $json.statusCode, detail: ($json.body && $json.body.detail) || 'A lead with this source and external_id already exists', message: ($json.body && $json.body.detail) || 'A lead with this source and external_id already exists' }) }}",
         "options": {
           "responseCode": 409
         }
@@ -205,7 +205,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ outcome: 'validation_failed', apiStatus: $json.statusCode, detail: ($json.body && $json.body.detail) || 'The lead payload was rejected by FastAPI' }) }}",
+        "responseBody": "={{ JSON.stringify({ outcome: 'validation_failed', apiStatus: $json.statusCode, detail: ($json.body && $json.body.detail) || 'The lead payload was rejected by FastAPI', message: ($json.body && $json.body.detail) || 'The lead payload was rejected by FastAPI' }) }}",
         "options": {
           "responseCode": 422
         }
@@ -222,7 +222,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ outcome: 'upstream_error', apiStatus: $json.statusCode || null, detail: 'The lead API did not accept the request' }) }}",
+        "responseBody": "={{ JSON.stringify({ outcome: 'upstream_error', apiStatus: $json.statusCode || null, detail: 'The lead API did not accept the request', message: 'The lead API did not accept the request' }) }}",
         "options": {
           "responseCode": 502
         }
