@@ -2,6 +2,22 @@
 
 > An automated inbound lead qualification and routing system built with FastAPI, PostgreSQL, n8n, configurable LLM scoring, and dual Telegram/WhatsApp operator alerts.
 
+**Live Production Deployment:** [https://leadintel-caddy.onrender.com](https://leadintel-caddy.onrender.com)  
+**Interactive Lead Demo:** [https://leadintel-caddy.onrender.com/demo](https://leadintel-caddy.onrender.com/demo)  
+**Production Release Status:** Verified on commit [`2fc400f`](https://github.com/salahadin-hassen/lead-intelligence-automation/commit/2fc400f) (All 14 deployment gates passed)
+
+---
+
+## 30-Second Project Overview (For Clients & Recruiters)
+
+| Question | Detail |
+| :--- | :--- |
+| **What does it do?** | Ingests B2B contact inquiries, rejects duplicate submissions at the database level, scores buying intent ($0\text{--}100$) using hybrid AI, and alerts sales teams in real time. |
+| **Live Product Demo** | Hosted live at [`https://leadintel-caddy.onrender.com`](https://leadintel-caddy.onrender.com). Dedicated `/demo` route with instant form validation and duplicate replay testing. |
+| **Production Architecture** | Caddy 2.8 Edge Ingress $\rightarrow$ n8n 2.41 Webhook $\rightarrow$ Authenticated FastAPI (Python 3.12) $\rightarrow$ Neon Serverless PostgreSQL 16. |
+| **Verified Guarantees** | Zero duplicate leads (database unique constraints), multi-tier AI intent scoring with deterministic heuristic fallback, caller-response isolation, and **104 automated tests** (0 skips, 0 xfails). |
+| **What is Implemented?** | Production-ready website lead intake, database deduplication, intent scoring, Telegram sales alerts, and WhatsApp Cloud API templates. *(CRM sync and email scraping are planned for future phases).* |
+
 ---
 
 ## Portfolio Summary (Quick Read)
@@ -10,7 +26,7 @@ Inbound B2B lead generation often stalls on manual triage: validating contact de
 
 Incoming inquiries from a responsive, client-facing web portal are filtered through access-controlled ingress, ingested by an **n8n** automation workflow, and persisted in **PostgreSQL 16** via a **FastAPI** service. Inbound messages are evaluated by a provider-agnostic LLM scoring engine (OpenRouter free router or OpenAI-compatible) that falls back automatically to a local, deterministic heuristic scorer if external inference is unavailable or malformed. High-priority leads (`score >= 70`) trigger instant Telegram and WhatsApp Business Cloud notifications to sales, while all leads receive structured, execution-native audit logging.
 
-Engineered with defensive failure isolation: upstream intake never fails due to scoring or notification outages. Fully verified with **97 automated tests** (fail-loud test database requirement), comprehensive rehearsal failure drills, and workflow-level notification error boundaries.
+Engineered with defensive failure isolation: upstream intake never fails due to scoring or notification outages. Fully verified with **104 automated tests** (fail-loud test database requirement), comprehensive rehearsal failure drills, and workflow-level notification error boundaries.
 
 ---
 
@@ -62,8 +78,8 @@ n8n Qualification & Audit Layer
 - **Caller-Response Isolation:** In n8n, the HTTP `201 Created` response executes *before* the downstream qualification, audit, Telegram, and WhatsApp nodes. A downstream outage (such as Telegram or Meta WhatsApp API downtime) never delays or causes a false 500 error for the prospect.
 - **Dual-Channel Mobile Alerts with Isolated Error Boundaries:** Priority (`qualified`) and `manual_review` leads trigger Telegram messages and WhatsApp Business Cloud API alerts. Both WhatsApp send nodes configure `onError: continueErrorOutput` to prevent notification failures from terminating sibling branches or executions.
 - **PII Protection & Data Minimization:** Prompts sent to external LLMs contain only `source`, `company`, and `message` (customer `name` and `email` are never transmitted). WhatsApp notifications send only contact coordinates and omit free-text messages to minimize external exposure.
-- **Responsive B2B Web Experience:** The client-facing demo portal is built in self-contained, dependency-free HTML5/CSS/JS with accessible form states, client-side validation, live payload preview telemetry, and dynamic `external_id` idempotency.
-- **Strict Testing Philosophy:** 97 automated tests with zero skips and zero xfails. Tests require a real PostgreSQL database instance and fail loudly with descriptive errors if it is missing.
+- **Responsive B2B Web Experience:** The client-facing demo portal is built in self-contained, dependency-free HTML5/CSS/JS with accessible form states, client-side validation, live payload preview telemetry, and dynamic `external_id` generation for duplicate prevention.
+- **Strict Testing Philosophy:** 104 automated tests with zero skips and zero xfails. Tests require a real PostgreSQL database instance and fail loudly with descriptive errors if it is missing.
 
 ---
 
@@ -94,7 +110,7 @@ The system's reliability guarantees have been verified across automated unit/int
 | Component | Technology | Primary Responsibilities |
 |---|---|---|
 | **Edge / Proxy** | Caddy v2 | HTTPS termination, demo Basic Auth protection, same-origin static file serving, and `/webhook/*` reverse proxying. |
-| **Client Portal** | Responsive Vanilla JS / HTML5 | Accessible, responsive product demo (`demo/lead-form.html`). Generates per-message `external_id` for client-side idempotency with live telemetry. |
+| **Client Portal** | Responsive Vanilla JS / HTML5 | Accessible, responsive product demo (`demo/lead-form.html`). Generates per-message `external_id` for duplicate prevention with live telemetry. |
 | **Orchestrator** | n8n 2.41.7 | Webhook intake, API forwarding, score threshold comparison, structured audit event creation, Telegram Bot and WhatsApp Business dispatch. |
 | **Core Service** | FastAPI (Python 3.12) | Request validation, business logic, connection pool lifecycle, and CSV export. Raw parameterized SQL only. |
 | **Persistence** | PostgreSQL 16 | Authoritative data store. Manages `leads` table, indexes, unique constraints, and schema migrations. |
@@ -104,16 +120,30 @@ The system's reliability guarantees have been verified across automated unit/int
 
 ---
 
-## Known Scope & Explicit Limitations
+## Implemented MVP vs. Planned Features
 
-To maintain engineering credibility, this project explicitly documents what is **in scope** versus **out of scope**:
+To maintain engineering credibility with clients and technical recruiters, the repository explicitly separates what is **fully implemented and verified** from **future roadmap items**:
 
-- **Initial Business Rule:** The qualification threshold ($70$) is an initial operational rule based on observed heuristic score clustering; it is not a statistically validated machine learning conversion model.
-- **Deployment Status:** **Deployment-ready for single-client infrastructure, not permanently hosted.** Rehearsed and verified on local infrastructure and temporary Cloudflare Quick Tunnels. No persistent cloud VM, public DNS, or permanent domain is provisioned.
-- **Live WhatsApp Delivery:** Workflow routing, template definitions, and isolated error boundaries are fully implemented in `n8n/lead-intake.json`. Live message delivery requires an active Meta Developer account, verified sender/recipient phone numbers, and approved message templates (see `docs/whatsapp-setup.md`).
-- **Access Control Scope:** Authentication is currently implemented at the Caddy proxy level for demo access; FastAPI internal endpoints are unauthenticated and intended to bind strictly to loopback (`127.0.0.1`).
-- **Free LLM Provider Constraints:** OpenRouter free router limits, latency, and availability depend on third-party quotas (currently 50 free requests/day without credits).
-- **No Unimplemented Features:** No CRM sync (HubSpot/Salesforce), user account management, or background message broker (Celery/RabbitMQ) is currently included.
+| Capability Area | Implemented & Production-Verified MVP | Planned / Future Roadmap |
+| :--- | :--- | :--- |
+| **Inbound Capture** | Dedicated web portal (`/`) and interactive demo route (`/demo`) with client-side submission key generation (`external_id`). | Ingestion from external forms (Typeform, Calendly, LinkedIn ads). |
+| **Edge Ingress** | Caddy 2.8 reverse proxy handling TLS and same-origin `/webhook/lead-intake` routing. | Custom enterprise vanity domains with automated SSL rotation. |
+| **Data Validation** | FastAPI + Pydantic schema validation (422 Unprocessable Entity on malformed payloads). | Dynamic client-defined schema validation via UI builder. |
+| **Data Deduplication** | Database-enforced `UNIQUE (source, external_id)` constraint returning HTTP 409 Conflict. | Fuzzy cross-campaign prospect matching and merge rules. |
+| **Intent Scoring** | Hybrid multi-tier engine: OpenRouter LLM + deterministic heuristic fallback. | Fine-tuned domain models and adaptive ML qualification thresholds. |
+| **Caller Isolation** | HTTP 201 response delivers before downstream notification nodes run. | Asynchronous background broker (Celery / RabbitMQ) for batch ingestion. |
+| **Sales Notifications** | Telegram Bot API live alerts + WhatsApp Cloud API template routing with error boundaries. | Bidirectional CRM synchronization (HubSpot, Salesforce, Pipedrive). |
+| **Deployment** | Dockerized deployment on Render Web Services + Neon Serverless PostgreSQL 16. | Multi-tenant SaaS architecture with user login & RBAC dashboard. |
+
+---
+
+## Known Scope & Operational Boundaries
+
+- **Qualification Threshold:** The qualification threshold ($70$) is an initial operational business rule based on observed heuristic score clustering; it is not a statistically validated machine learning conversion model.
+- **Production Deployment:** Live in production on Render free tier (`leadintel-caddy.onrender.com`, `leadintel-api-2y0i.onrender.com`, `leadintel-n8n.onrender.com`) and Neon Serverless PostgreSQL. Instances sleep after 15 minutes of inactivity; initial cold starts take ~40–50s, while warm requests execute in ~4–5s.
+- **Live WhatsApp Delivery:** Workflow routing, template definitions, and isolated error boundaries are fully implemented in `n8n/lead-intake.json`. Live message delivery requires an active Meta Developer account, verified sender/recipient phone numbers, and approved message templates (see [`docs/whatsapp-setup.md`](docs/whatsapp-setup.md)).
+- **Access Control Scope:** Ingress protection via Caddy; FastAPI implements fail-closed Bearer token authentication (`API_AUTH_TOKEN`) in production (`APP_ENV=production`).
+- **Free LLM Provider Constraints:** OpenRouter free router availability depends on third-party daily quotas (50 requests/day). If exhausted or unavailable, the deterministic heuristic scorer takes over automatically.
 
 ---
 
@@ -138,7 +168,7 @@ cp .env.example .env
 ### 3. Run Automated Tests
 ```bash
 .venv/bin/python -m pytest -q
-# Expected result: 103 passed
+# Expected result: 104 passed
 ```
 
 ### 4. Run the API Locally
@@ -152,11 +182,12 @@ cp .env.example .env
 
 ## Documentation Quick Links
 
-- [**Production Deployment Guide**](docs/production-deployment.md) — One-click zero-cost deployment on Render Blueprints with Neon Serverless PostgreSQL.
-- [**Technical Case Study**](docs/case-study.md) — In-depth architectural decisions, trade-offs, and 3 verified engineering incident resolutions.
-- [**3-Minute Demo Walkthrough**](docs/demo-walkthrough.md) — Screen recording script demonstrating lead intake, persistence, and reliability.
+- [**Client Portfolio Case Study**](docs/portfolio-case-study.md) — Comprehensive business case study, architectural decisions, and production verification evidence.
+- [**Client Live Demo Guide**](docs/client-demo-guide.md) — 3-to-5 minute repeatable live demonstration walkthrough and presenter script.
+- [**Production Deployment Guide**](docs/production-deployment.md) — Complete cloud deployment architecture on Render with Neon Serverless PostgreSQL.
 - [**WhatsApp Setup & Integration Guide**](docs/whatsapp-setup.md) — Meta Cloud API configuration, template schemas, credential setup, and failure isolation.
 - [**Recruiter / Client Evaluation Guide**](docs/project-evaluation-guide.md) — 5-to-10 minute code tour for technical reviewers.
+- [**Technical Case Study & Incident Log**](docs/case-study.md) — Deep dive into 3 verified engineering incident resolutions and fault-injection drills.
 - [**Deployment & Rehearsal Guide**](docs/deployment.md) — Service units, Caddy configuration, failure drills, and verification ledger.
 - [**n8n Integration Guide**](docs/n8n-integration.md) — Complete workflow contract, node execution order, Telegram, and WhatsApp configuration.
 - [**Lead Form Source**](demo/lead-form.html) — Client-facing responsive portal implementation.
