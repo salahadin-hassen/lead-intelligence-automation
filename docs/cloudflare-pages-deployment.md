@@ -63,11 +63,12 @@ If your project was connected under the **Workers** tab (where Cloudflare automa
 ```json
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "leadintel",
+  "name": "lead-intelligence-automation",
   "main": "functions/webhook/lead-intake.js",
   "compatibility_date": "2024-09-23",
   "assets": {
     "directory": "./var/pages-public",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": false
   }
@@ -82,15 +83,14 @@ If your project was connected under the **Workers** tab (where Cloudflare automa
 
 ## 3. Routing & Path Mechanics
 
-### Static SPA Routes (`_redirects`)
-LeadIntel's client-side router manages navigation between the marketing overview (`/`) and the interactive demo (`/demo`). To support direct URL navigation and browser refreshes on `/demo` without 404 errors, `deploy/bin/build-pages.sh` outputs a `_redirects` file:
-
-```text
-/demo   /index.html   200
-/demo/  /index.html   200
-```
-
-With status code `200`, Cloudflare Pages performs a server-side rewrite, serving `index.html` while preserving `/demo` in the user's browser address bar.
+### Static Route Assets (`demo.html` & `demo/index.html`)
+LeadIntel's client-side router manages navigation between the marketing overview (`/`) and the interactive demo (`/demo`).
+- To prevent Cloudflare's clean-URL normalizer from redirecting rewrite targets (such as `/index.html`) back to `/` via `307 Temporary Redirect`, `deploy/bin/build-pages.sh` emits direct static assets:
+  - `var/pages-public/index.html` for `/`
+  - `var/pages-public/lead-form.html` for `/lead-form`
+  - `var/pages-public/demo.html` for clean `/demo` requests
+  - `var/pages-public/demo/index.html` for directory `/demo/` requests
+- Direct URL entry and browser refreshes on `/demo` or `/demo/` load the demo view immediately with `HTTP 200 OK`.
 
 ### Webhook Proxy Function (`/webhook/lead-intake`)
 When the browser submits a lead, it sends a same-origin request to `POST /webhook/lead-intake`.

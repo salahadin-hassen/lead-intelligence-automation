@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Build static assets for Cloudflare Pages deployment.
+# Build static assets for Cloudflare Pages and Workers deployment.
 #
 # Output artifacts placed in:
-#   var/pages-public/index.html      copy of demo/lead-form.html
-#   var/pages-public/lead-form.html  copy under explicit filename
-#   var/pages-public/config.js       production config with same-origin webhook
-#   var/pages-public/_redirects      Cloudflare Pages SPA rewrite rules
-#   var/pages-public/_headers        security and content headers
+#   var/pages-public/index.html        copy of demo/lead-form.html (marketing landing page)
+#   var/pages-public/lead-form.html    copy under explicit filename
+#   var/pages-public/demo.html         copy for clean-URL /demo route (prevents 307 redirect loop)
+#   var/pages-public/demo/index.html   copy for directory route /demo/
+#   var/pages-public/config.js         production config with same-origin webhook
+#   var/pages-public/_redirects        Cloudflare Pages rewrite rules
+#   var/pages-public/_headers          security and content headers
 #
 set -euo pipefail
 
@@ -24,9 +26,14 @@ fi
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
-# Copy frontend HTML
+# Copy frontend HTML to root and clean-URL destinations
 cp "$SRC_HTML" "$BUILD_DIR/index.html"
 cp "$SRC_HTML" "$BUILD_DIR/lead-form.html"
+cp "$SRC_HTML" "$BUILD_DIR/demo.html"
+
+# Also support trailing-slash directory navigation /demo/
+mkdir -p "$BUILD_DIR/demo"
+cp "$SRC_HTML" "$BUILD_DIR/demo/index.html"
 
 # Generate production config.js pointing strictly to same-origin webhook
 cat > "$BUILD_DIR/config.js" <<'EOF'
@@ -36,20 +43,21 @@ window.LEAD_FORM_CONFIG = {
 };
 EOF
 
-# Generate Cloudflare Pages SPA rewrite rules
-# Rewrites /demo and /demo/ to /index.html with status 200 (preserves browser URL)
-cat > "$BUILD_DIR/_redirects" <<'EOF'
-# Cloudflare Pages SPA rewrite rules for LeadIntel
-/demo   /index.html   200
-/demo/  /index.html   200
-EOF
-
 # Generate Cloudflare Pages security headers
 cat > "$BUILD_DIR/_headers" <<'EOF'
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
+EOF
+
+# Cloudflare Pages / Workers static assets note:
+# Direct static files are provided for index.html, lead-form.html, demo.html, and demo/index.html.
+# Do NOT rewrite /demo or /demo/ to /index.html in _redirects; Cloudflare's clean-URL normalizer
+# redirects /index.html targets to / via 307 Temporary Redirect.
+cat > "$BUILD_DIR/_redirects" <<'EOF'
+# Cloudflare Pages rewrite configuration
+# Direct static files handle /, /lead-form, /demo, and /demo/.
 EOF
 
 echo "build-pages: successfully built Cloudflare Pages static assets in $BUILD_DIR"
