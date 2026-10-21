@@ -149,6 +149,9 @@ def score_lead_heuristic(lead: LeadCreate) -> ScoringResult:
     elif "newsletter" in source:
         score -= 8
         reasons.append("low-intent source (newsletter)")
+    elif "gmail" in source:
+        # Neutral inbound channel; score stays at baseline per requirement not to inflate scores
+        reasons.append("direct email channel (gmail)")
 
     score = max(0, min(100, score))
     reason = "; ".join(reasons) if reasons else "Baseline inbound lead"

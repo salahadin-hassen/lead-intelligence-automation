@@ -56,5 +56,19 @@ if [ -f "/workflows/lead-intake.json" ]; then
   rm -f /tmp/check-lead-intake.json
 fi
 
+# Safe, non-destructive provisioning of gmail-lead-intake workflow.
+# Preserves existing configuration/credentials on restart.
+# Imports workflow INACTIVE pending manual OAuth2 configuration.
+if [ -f "/workflows/gmail-lead-intake.json" ]; then
+  if [ "${N8N_FORCE_IMPORT_WORKFLOW:-false}" = "true" ] || ! n8n export:workflow --id=gmail-lead-intake --output=/tmp/check-gmail-lead-intake.json >/dev/null 2>&1; then
+    echo "[n8n-entrypoint] Workflow gmail-lead-intake not found in database or force requested; importing from /workflows/gmail-lead-intake.json..."
+    n8n import:workflow --input=/workflows/gmail-lead-intake.json || echo "[n8n-entrypoint] Note: Initial import will complete on database convergence"
+    echo "[n8n-entrypoint] Note: gmail-lead-intake imported inactive pending operator Gmail OAuth2 configuration."
+  else
+    echo "[n8n-entrypoint] Workflow gmail-lead-intake already exists; preserving existing configuration and credential bindings."
+  fi
+  rm -f /tmp/check-gmail-lead-intake.json
+fi
+
 echo "[n8n-entrypoint] Starting n8n on port ${N8N_PORT}..."
 exec n8n start

@@ -1,0 +1,644 @@
+{
+  "id": "gmail-lead-intake",
+  "name": "Gmail Lead Intake & Qualification",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "all",
+          "labelIds": [
+            "LeadIntel_Leads"
+          ],
+          "q": "-in:spam -in:trash"
+        },
+        "options": {
+          "includeSpamTrash": false,
+          "downloadAttachments": false
+        }
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000001",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail_oauth_pilot",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normalize raw inbound Gmail message into LeadIntel schema\nconst item = $input.first().json || {};\nconst headers = item.headers || {};\n\n// 1. Resolve message ID (external_id)\nconst messageId = String(item.id || headers[\"message-id\"] || \"\").trim();\nif (!messageId) {\n  return [{\n    json: {\n      status: \"skip\",\n      reason: \"malformed_data\",\n      detail: \"Missing stable Gmail message ID\",\n      messageId: null\n    }\n  }];\n}\n\n// 2. Resolve From header and extract email & display name\nlet rawFrom = \"\";\nif (typeof item.from === \"string\") {\n  rawFrom = item.from;\n} else if (item.from && typeof item.from.text === \"string\") {\n  rawFrom = item.from.text;\n} else if (item.from && Array.isArray(item.from.value) && item.from.value[0]) {\n  const val = item.from.value[0];\n  rawFrom = val.name ? `${val.name} <${val.address}>` : (val.address || \"\");\n} else if (typeof headers.from === \"string\") {\n  rawFrom = headers.from;\n}\nrawFrom = rawFrom.trim();\n\nlet senderName = \"\";\nlet senderEmail = \"\";\n\nconst angleMatch = rawFrom.match(/^(.*?)\\s*<([^>]+)>$/);\nif (angleMatch) {\n  senderName = angleMatch[1].replace(/^[\\\"\\'\\s]+|[\\\"\\'\\s]+$/g, \"\").trim();\n  senderEmail = angleMatch[2].trim();\n} else if (/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(rawFrom)) {\n  senderEmail = rawFrom;\n} else {\n  const match = rawFrom.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})/);\n  if (match) {\n    senderEmail = match[1];\n    senderName = rawFrom.replace(match[0], \"\").replace(/[<>()\\\"\\']/g, \"\").trim();\n  }\n}\n\n// Basic email validation\nif (!senderEmail || !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/.test(senderEmail)) {\n  return [{\n    json: {\n      status: \"skip\",\n      reason: \"malformed_data\",\n      detail: \"Missing or unparseable sender email in From header\",\n      messageId\n    }\n  }];\n}\n\n// 3. Resolve Subject\nconst subject = String(item.subject || headers.subject || \"\").trim();\n\n// 4. Automated notice / bounce / auto-reply detection\nconst lowerSubject = subject.toLowerCase();\nconst lowerFrom = rawFrom.toLowerCase();\nconst autoSubmitted = String(headers[\"auto-submitted\"] || \"\").toLowerCase();\n\nconst isAutomated = (\n  autoSubmitted === \"auto-replied\" ||\n  autoSubmitted === \"auto-generated\" ||\n  lowerFrom.includes(\"mailer-daemon@\") ||\n  lowerFrom.includes(\"postmaster@\") ||\n  lowerFrom.includes(\"noreply@\") ||\n  lowerFrom.includes(\"no-reply@\") ||\n  lowerSubject.startsWith(\"automatic reply:\") ||\n  lowerSubject.startsWith(\"out of office:\") ||\n  lowerSubject.includes(\"delivery status notification\") ||\n  lowerSubject.includes(\"undelivered mail\") ||\n  lowerSubject.includes(\"failure notice\")\n);\n\nif (isAutomated) {\n  return [{\n    json: {\n      status: \"skip\",\n      reason: \"automated_notice\",\n      detail: \"Detected automated notice, delivery failure, or out-of-office message\",\n      messageId,\n      senderEmail,\n      subject\n    }\n  }];\n}\n\n// 5. Body Extraction and Cleaning\nlet rawBody = \"\";\nif (typeof item.text === \"string\" && item.text.trim()) {\n  rawBody = item.text;\n} else if (typeof item.html === \"string\" && item.html.trim()) {\n  rawBody = item.html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, \"\")\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, \"\")\n    .replace(/<br\\s*[\\/]?>/gi, \"\\n\")\n    .replace(/<\\/(p|div|tr|li|h[1-6])>/gi, \"\\n\")\n    .replace(/<[^>]+>/g, \"\")\n    .replace(/&nbsp;/gi, \" \")\n    .replace(/&amp;/gi, \"&\")\n    .replace(/&lt;/gi, \"<\")\n    .replace(/&gt;/gi, \">\")\n    .replace(/&quot;/gi, \"\\\"\")\n    .replace(/&#39;/gi, \"'\");\n} else if (typeof item.snippet === \"string\") {\n  rawBody = item.snippet;\n}\n\n// Strip reply chains & email quotes\nconst bodyLines = rawBody.split(/\\r?\\n/);\nconst cleanedLines = [];\nfor (const line of bodyLines) {\n  const trimmed = line.replace(/[ \\t]+/g, \" \").trim();\n  if (/^>/.test(trimmed)) continue;\n  if (/^on\\s+.*wrote:$/i.test(trimmed)) break;\n  if (/^-----Original Message-----/i.test(trimmed)) break;\n  if (/^From:\\s.*Sent:\\s/i.test(trimmed)) break;\n  cleanedLines.push(trimmed);\n}\n\nlet cleanedBody = cleanedLines.join(\"\\n\").replace(/\\n{3,}/g, \"\\n\\n\").trim();\nif (cleanedBody.length > 3000) {\n  cleanedBody = cleanedBody.slice(0, 3000) + \"\u2026 [truncated]\";\n}\n\nconst finalMessage = subject\n  ? (cleanedBody ? `Subject: ${subject}\\n\\n${cleanedBody}` : `Subject: ${subject}`)\n  : (cleanedBody || \"[Inbound email inquiry with no text body]\");\n\n// 6. Name derivation\nif (!senderName) {\n  const localPart = senderEmail.split(\"@\")[0].replace(/[._+-]+/g, \" \").trim();\n  if (localPart && !/^\\d+$/.test(localPart)) {\n    senderName = localPart\n      .split(\" \")\n      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())\n      .join(\" \");\n  } else {\n    senderName = \"Direct Inquirer\";\n  }\n}\n\n// 7. Company derivation\nconst freeMailDomains = new Set([\n  \"gmail.com\", \"googlemail.com\", \"yahoo.com\", \"yahoo.co.uk\", \"hotmail.com\",\n  \"outlook.com\", \"live.com\", \"msn.com\", \"icloud.com\", \"me.com\", \"proton.me\",\n  \"protonmail.com\", \"aol.com\", \"mail.com\", \"gmx.com\", \"zoho.com\", \"yandex.com\"\n]);\n\nconst domain = senderEmail.split(\"@\")[1].toLowerCase();\nlet company = \"\";\n\nif (!freeMailDomains.has(domain)) {\n  const mainPart = domain.split(\".\")[0];\n  company = mainPart\n    .replace(/[-_]+/g, \" \")\n    .split(\" \")\n    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())\n    .join(\" \");\n} else {\n  const compMatch = cleanedBody.match(/\\b(?:company|organization|firm|agency)\\s*[:=-]\\s*([^\\r\\n,]+)/i);\n  if (compMatch && compMatch[1].trim()) {\n    company = compMatch[1].trim();\n  } else {\n    company = \"Unspecified\";\n  }\n}\n\nconst apiBase = ($env.LEAD_API_BASE_URL || \"https://leadintel-api-2y0i.onrender.com\").replace(/\\/+$/, \"\");\n\nreturn [{\n  json: {\n    status: \"valid\",\n    lead: {\n      name: senderName,\n      email: senderEmail,\n      company: company,\n      message: finalMessage,\n      source: \"gmail\",\n      external_id: messageId\n    },\n    apiLeadsUrl: `${apiBase}/leads`,\n    qualifiedThreshold: 70,\n    thresholdSource: \"default_policy\"\n  }\n}];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000002",
+      "name": "Normalize Email Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-valid",
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "valid",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "valid"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000003",
+      "name": "Filter Valid Leads",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Log skipped messages (e.g. automated bounce, out-of-office, missing sender)\nconst skipped = $input.first().json || {};\nreturn [{\n  json: {\n    event: 'gmail_message_skipped',\n    reason: skipped.reason || 'unknown',\n    detail: skipped.detail || null,\n    messageId: skipped.messageId || null,\n    senderEmail: skipped.senderEmail || null,\n    subject: skipped.subject || null,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000004",
+      "name": "Log Skipped Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "url": "={{ $json.apiLeadsUrl }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.lead) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000005",
+      "name": "Create Lead in FastAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -100
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fastapi_auth_token",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-created",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 201,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "created"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-duplicate",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 409,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "duplicate"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-validation",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 422,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "validation_failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-auth-401",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 401,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  },
+                  {
+                    "id": "cond-auth-403",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 403,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "or"
+              },
+              "renameOutput": true,
+              "outputKey": "auth_error"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000006",
+      "name": "Route on API Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Idempotent duplicate: same (source=gmail, external_id=messageId) already ingested\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\nconst config = $('Normalize Email Lead').first().json || {};\nconst extId = (config.lead && config.lead.external_id) || null;\n\nreturn [{\n  json: {\n    event: 'gmail_lead_duplicate',\n    status: 'duplicate_idempotent',\n    external_id: extId,\n    statusCode: http.statusCode,\n    detail: body.detail || 'A lead with this source and external_id already exists',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000007",
+      "name": "Log Idempotent Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// FastAPI rejected payload with 422 Unprocessable Entity\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\nconst config = $('Normalize Email Lead').first().json || {};\n\nreturn [{\n  json: {\n    event: 'gmail_lead_validation_failed',\n    status: 'rejected',\n    statusCode: http.statusCode,\n    validationErrors: body.detail || null,\n    lead: config.lead || null,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000008",
+      "name": "Log Validation Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// FastAPI rejected API authentication with 401/403\nconst http = $input.first().json || {};\n\nreturn [{\n  json: {\n    event: 'gmail_lead_auth_error',\n    status: 'auth_failed',\n    statusCode: http.statusCode,\n    message: 'FastAPI rejected the n8n Header Auth token. Please verify API_AUTH_TOKEN.',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000009",
+      "name": "Log Auth Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Upstream failure: 5xx, timeout, or network drop\nconst http = $input.first().json || {};\n\nreturn [{\n  json: {\n    event: 'gmail_lead_upstream_error',\n    status: 'upstream_failure',\n    statusCode: http.statusCode || null,\n    message: 'The lead API was unreachable or returned an upstream error.',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000010",
+      "name": "Log Upstream Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Extract lead and score from 201 Created response\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\n\nconst rawScore = body.score;\nconst score = (typeof rawScore === 'number' && Number.isFinite(rawScore))\n  ? rawScore\n  : null;\n\nreturn [{\n  json: {\n    apiStatus: typeof http.statusCode === 'number' ? http.statusCode : null,\n    leadId: body.lead_id ?? null,\n    name: body.name ?? null,\n    email: body.email ?? null,\n    company: body.company ?? null,\n    source: body.source ?? 'gmail',\n    score,\n    scoreReason: body.score_reason ?? null\n  }\n}];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000011",
+      "name": "Extract Lead + Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Qualification decision based on configured threshold\nconst config = $('Normalize Email Lead').first().json || {};\nconst threshold = config.qualifiedThreshold || 70;\nconst extracted = $input.first().json || {};\nconst score = extracted.score;\n\nconst thresholdOk = typeof threshold === 'number' && Number.isFinite(threshold);\n\nlet qualification;\nlet priority;\nif (!thresholdOk || typeof score !== 'number' || !Number.isFinite(score)) {\n  qualification = 'manual_review';\n  priority = null;\n} else if (score >= threshold) {\n  qualification = 'qualified';\n  priority = 'high';\n} else {\n  qualification = 'not_qualified';\n  priority = 'normal';\n}\n\nreturn [{\n  json: {\n    ...extracted,\n    qualification,\n    priority,\n    qualifiedThreshold: thresholdOk ? threshold : null,\n    thresholdSource: config.thresholdSource ?? 'unknown'\n  }\n}];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000012",
+      "name": "Qualification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-qualified",
+                    "leftValue": "={{ $json.qualification }}",
+                    "rightValue": "qualified",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qualified"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-not-qualified",
+                    "leftValue": "={{ $json.qualification }}",
+                    "rightValue": "not_qualified",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "not_qualified"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-manual-review",
+                    "leftValue": "={{ $json.qualification }}",
+                    "rightValue": "manual_review",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "manual_review"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000013",
+      "name": "Route on Qualification",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1940,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Priority-branch operational record for a qualified Gmail lead\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'gmail_lead_qualified',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'qualified',\n  priority: lead.priority ?? 'high',\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn [{ json: record }];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000014",
+      "name": "Log Priority Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        -440
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Normal-branch operational record for a non-qualified Gmail lead\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'gmail_lead_not_qualified',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'not_qualified',\n  priority: lead.priority ?? 'normal',\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn [{ json: record }];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000015",
+      "name": "Log Normal Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        -320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Manual review operational record (score is null/unparseable or scoring failed)\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'gmail_lead_manual_review',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: 'manual_review',\n  priority: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn [{ json: record }];"
+      },
+      "id": "6a1d2b10-0000-4000-8000-000000000016",
+      "name": "Log Manual Review",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        -200
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Email Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Email Lead": {
+      "main": [
+        [
+          {
+            "node": "Filter Valid Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Valid Leads": {
+      "main": [
+        [
+          {
+            "node": "Create Lead in FastAPI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Skipped Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Lead in FastAPI": {
+      "main": [
+        [
+          {
+            "node": "Route on API Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route on API Status": {
+      "main": [
+        [
+          {
+            "node": "Extract Lead + Score",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Idempotent Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Validation Failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Auth Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Upstream Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Lead + Score": {
+      "main": [
+        [
+          {
+            "node": "Qualification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qualification": {
+      "main": [
+        [
+          {
+            "node": "Route on Qualification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route on Qualification": {
+      "main": [
+        [
+          {
+            "node": "Log Priority Route",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Normal Route",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Manual Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "templateSource": "lead-intelligence-automation"
+  }
+}

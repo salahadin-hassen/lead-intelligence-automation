@@ -16,7 +16,7 @@
 | **Live Product Demo** | Hosted live at [`https://leadintel-caddy.onrender.com`](https://leadintel-caddy.onrender.com). Dedicated `/demo` route with instant form validation and duplicate replay testing. |
 | **Production Architecture** | Caddy 2.8 Edge Ingress $\rightarrow$ n8n 2.41 Webhook $\rightarrow$ Authenticated FastAPI (Python 3.12) $\rightarrow$ Neon Serverless PostgreSQL 16. |
 | **Verified Guarantees** | Zero duplicate leads (database unique constraints), multi-tier AI intent scoring with deterministic heuristic fallback, caller-response isolation, and **104 automated tests** (0 skips, 0 xfails). |
-| **What is Implemented?** | Production-ready website lead intake, database deduplication, intent scoring, Telegram sales alerts, and WhatsApp Cloud API templates. *(CRM sync and email scraping are planned for future phases).* |
+| **What is Implemented?** | Production-ready website lead intake and pilot Gmail lead intake (`LeadIntel_Leads` label boundary), database deduplication, intent scoring, Telegram sales alerts, and WhatsApp Cloud API templates. *(CRM sync and multi-tenant OAuth platform are planned for future phases).* |
 
 ---
 
@@ -45,15 +45,16 @@ This system automates ingestion, deduplication, scoring, qualification, and sale
 ## End-to-End Flow
 
 ```text
-Lead Form (demo/lead-form.html)
-    │
-    ▼ HTTPS (Caddy Reverse Proxy & HTTP Basic Auth)
-n8n Webhook (/webhook/lead-intake)
-    │
-    ▼ HTTP POST /leads (FastAPI)
+Lead Form (demo/lead-form.html) OR Gmail Inbound (Label: LeadIntel_Leads)
+    │                                     │
+    ▼ HTTPS (/webhook/lead-intake)        ▼ n8n Gmail Trigger (every 1 min, readStatus: all)
+n8n Website Webhook Workflow          n8n Gmail Lead Intake Workflow (n8n/gmail-lead-intake.json)
+    │                                     │ (Strip HTML, clean reply chains, extract sender)
+    └──────────────────┬──────────────────┘
+                       ▼ HTTP POST /leads (Authenticated with Bearer Token)
 FastAPI Backend
     ├── Pydantic validation (422 on invalid schema / email)
-    ├── Deduplication on (source, external_id) -> 409 Conflict
+    ├── Deduplication on (source, external_id) -> 409 Conflict (idempotent for Gmail)
     ├── PostgreSQL 16 persistence (raw parameterized SQL)
     └── Scoring Dispatcher
            ├── Primary: OpenRouter Free LLM (/chat/completions)
@@ -62,11 +63,13 @@ FastAPI Backend
     ▼ Response (201 Created with score & reason)
 n8n Qualification & Audit Layer
     ├── score >= 70  ──► Qualified (Priority: High)   ──► Telegram & WhatsApp Alerts
-    ├── score <  70  ──► Not Qualified (Priority: Normal) (No notifications)
+    ├── score <  70  ──► Not Qualified (Priority: Normal) (Operational audit log only)
     └── score is null ──► Manual Review (Unscored)     ──► Telegram & WhatsApp Review Alerts
     │
     └──► Build Unified Audit Event (Persisted in n8n execution data)
 ```
+
+> **Gmail Integration Reference:** Complete OAuth setup instructions, Google Cloud consent screen configuration, dedicated label filtering (`LeadIntel_Leads`), normalization rules, and Render Free idle sleeping limitations are documented in [`docs/gmail-lead-ingestion.md`](docs/gmail-lead-ingestion.md).
 
 ---
 
