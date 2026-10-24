@@ -56,18 +56,77 @@ if [ -f "/workflows/lead-intake.json" ]; then
   rm -f /tmp/check-lead-intake.json
 fi
 
-# Safe, non-destructive provisioning of gmail-lead-intake workflow.
-# Preserves existing configuration/credentials on restart.
-# Imports workflow INACTIVE pending manual OAuth2 configuration.
-if [ -f "/workflows/gmail-lead-intake.json" ]; then
-  if [ "${N8N_FORCE_IMPORT_WORKFLOW:-false}" = "true" ] || ! n8n export:workflow --id=gmail-lead-intake --output=/tmp/check-gmail-lead-intake.json >/dev/null 2>&1; then
-    echo "[n8n-entrypoint] Workflow gmail-lead-intake not found in database or force requested; importing from /workflows/gmail-lead-intake.json..."
-    n8n import:workflow --input=/workflows/gmail-lead-intake.json || echo "[n8n-entrypoint] Note: Initial import will complete on database convergence"
-    echo "[n8n-entrypoint] Note: gmail-lead-intake imported inactive pending operator Gmail OAuth2 configuration."
+# Gmail workflow (gmail-lead-intake): imported INACTIVE, and only when missing.
+# N8N_FORCE_IMPORT_WORKFLOW above never touches it. To ship a changed
+# n8n/gmail-lead-intake.json, set N8N_FORCE_IMPORT_GMAIL_WORKFLOW=true for one
+# deploy (docs/gmail-lead-ingestion.md, Section 7). The forced import:
+#   - imports only gmail-lead-intake, never lead-intake;
+#   - keeps the stored workflow's credential bindings and label selection;
+#   - is skipped once the stored workflow came from this exact file, so a flag
+#     left set does not re-import on later restarts;
+#   - is refused while the Gmail workflow is active.
+# Failures are logged as ERROR and leave the stored workflow unchanged; n8n
+# still starts so website intake keeps running.
+GMAIL_WF=/workflows/gmail-lead-intake.json
+GMAIL_HELPER=/workflows/gmail-workflow-import.js
+if [ -f "$GMAIL_WF" ]; then
+  GMAIL_TMP=$(mktemp -d)
+  # Only "No workflows found" means missing; any other export failure (e.g. the
+  # database is unreachable) must not be mistaken for it and trigger an import.
+  if n8n export:workflow --id=gmail-lead-intake --output="$GMAIL_TMP/stored.json" >"$GMAIL_TMP/export.log" 2>&1; then
+    GMAIL_STATE=present
+  elif grep -q "No workflows found" "$GMAIL_TMP/export.log"; then
+    GMAIL_STATE=missing
   else
-    echo "[n8n-entrypoint] Workflow gmail-lead-intake already exists; preserving existing configuration and credential bindings."
+    GMAIL_STATE=unknown
   fi
-  rm -f /tmp/check-gmail-lead-intake.json
+
+  GMAIL_IMPORT=false
+  case "$GMAIL_STATE" in
+    missing)
+      echo "[n8n-entrypoint] Workflow gmail-lead-intake not found; importing it inactive from $GMAIL_WF..."
+      if node "$GMAIL_HELPER" prepare "$GMAIL_WF" "$GMAIL_TMP/import.json"; then
+        GMAIL_IMPORT=true
+      fi
+      ;;
+    present)
+      if [ "${N8N_FORCE_IMPORT_GMAIL_WORKFLOW:-false}" = "true" ]; then
+        GMAIL_RC=0
+        node "$GMAIL_HELPER" prepare "$GMAIL_WF" "$GMAIL_TMP/import.json" "$GMAIL_TMP/stored.json" || GMAIL_RC=$?
+        case "$GMAIL_RC" in
+          0)
+            echo "[n8n-entrypoint] N8N_FORCE_IMPORT_GMAIL_WORKFLOW=true: updating gmail-lead-intake only (credential bindings and label kept)..."
+            GMAIL_IMPORT=true
+            ;;
+          3)
+            echo "[n8n-entrypoint] gmail-lead-intake already matches $GMAIL_WF; nothing imported. Remove N8N_FORCE_IMPORT_GMAIL_WORKFLOW."
+            ;;
+          4)
+            echo "[n8n-entrypoint] ERROR: forced Gmail import refused because gmail-lead-intake is active; stored workflow left unchanged."
+            ;;
+          *)
+            echo "[n8n-entrypoint] ERROR: could not prepare the forced Gmail import; stored workflow left unchanged."
+            ;;
+        esac
+      else
+        echo "[n8n-entrypoint] Workflow gmail-lead-intake already exists; preserving existing configuration and credential bindings."
+      fi
+      ;;
+    *)
+      echo "[n8n-entrypoint] ERROR: could not read gmail-lead-intake from the n8n database; Gmail provisioning skipped."
+      ;;
+  esac
+
+  if [ "$GMAIL_IMPORT" = "true" ]; then
+    if n8n import:workflow --input="$GMAIL_TMP/import.json" &&
+      n8n export:workflow --id=gmail-lead-intake --output="$GMAIL_TMP/after.json" >/dev/null 2>&1 &&
+      node "$GMAIL_HELPER" verify "$GMAIL_WF" "$GMAIL_TMP/after.json"; then
+      echo "[n8n-entrypoint] gmail-lead-intake imported inactive; bind its credentials in the n8n UI before activating."
+    else
+      echo "[n8n-entrypoint] ERROR: gmail-lead-intake import failed or could not be verified; check it in the n8n UI before use."
+    fi
+  fi
+  rm -rf "$GMAIL_TMP"
 fi
 
 echo "[n8n-entrypoint] Starting n8n on port ${N8N_PORT}..."

@@ -6,8 +6,9 @@ USER root
 RUN mkdir -p /workflows && chown -R node:node /workflows
 COPY n8n/lead-intake.json /workflows/lead-intake.json
 COPY n8n/gmail-lead-intake.json /workflows/gmail-lead-intake.json
+COPY deploy/docker/gmail-workflow-import.js /workflows/gmail-workflow-import.js
 COPY deploy/docker/n8n-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh && chown node:node /docker-entrypoint.sh /workflows/lead-intake.json /workflows/gmail-lead-intake.json
+RUN chmod +x /docker-entrypoint.sh && chown node:node /docker-entrypoint.sh /workflows/lead-intake.json /workflows/gmail-lead-intake.json /workflows/gmail-workflow-import.js
 
 USER node
 

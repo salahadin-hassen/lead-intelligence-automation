@@ -14,7 +14,7 @@ The Gmail ingestion pipeline introduces an asynchronous email triage channel alo
 |   Inbound Customer Email --> Labeled "LeadIntel_Leads"                  |
 +-------------------------------------------------------------------------+
                                     |
-                                    | Poll (every 1 min, readStatus: "all")
+                                    | Poll (every 1 min, readStatus: "both")
                                     v
 +-------------------------------------------------------------------------+
 |                       N8N WORKFLOW ENGINE (v2.41.7)                     |
@@ -36,6 +36,7 @@ The Gmail ingestion pipeline introduces an asynchronous email triage channel alo
 |      * 422 Invalid   -> Log Validation Failure (Review branch)          |
 |      * 401/403 Auth  -> Log Auth Error (Alert operator)                 |
 |      * 5xx Upstream  -> Log Upstream Error                              |
+|      * Timeout/network -> retried 3x, then the execution fails          |
 +-------------------------------------------------------------------------+
                                     |
                                     | Authenticated POST (Bearer Token)
@@ -70,8 +71,9 @@ To protect client privacy and ensure mailbox integrity, the integration adheres 
 2. **Read-Only Operation:**
    - The workflow **never** sends, replies, forwards, archives, deletes, or modifies emails.
    - It does not alter message read/unread flags.
-3. **Read-State Independence (`readStatus: "all"`):**
-   - By setting `readStatus: "all"`, a sales representative can open and read an inquiry in their email client without causing the automation to skip the message on the next polling cycle.
+   - n8n's Gmail OAuth2 credential requests full-mailbox scopes (`https://mail.google.com/`, `gmail.modify`, `gmail.compose`) by default. Restrict the token itself with **Custom Scopes** (Section 6, Step 4) so read-only is enforced by Google, not only by the workflow design.
+3. **Read-State Independence (`readStatus: "both"`):**
+   - By setting `readStatus: "both"` (n8n's "Unread and read emails" option; any other value is appended to the search as `is:<value>`), a sales representative can open and read an inquiry in their email client without causing the automation to skip the message on the next polling cycle.
 4. **No Attachment Processing:**
    - In this MVP iteration, email attachments are not downloaded or parsed (`downloadAttachments: false`), eliminating malicious payload ingestion risks.
 5. **Untrusted Data Handling:**
@@ -113,13 +115,13 @@ The normalization Code node (`n8n/normalize-gmail.js`) converts irregular MIME e
 | `name` | Extracted display name from `From` header (e.g., `"Jane Doe <jane@co.com>"` $\rightarrow$ `Jane Doe`). | If no display name exists, parsed from local-part (e.g., `jane.smith@...` $\rightarrow$ `Jane Smith`). If non-alphabetic or empty $\rightarrow$ `"Direct Inquirer"`. |
 | `email` | Validated email address from `From` header. | Malformed or missing email causes immediate routing to `Log Skipped Message` (never sent to FastAPI). |
 | `company` | Inferred corporate name from corporate email domain (e.g., `alice@acme-corp.com` $\rightarrow$ `Acme Corp`). | For free-mail providers (`gmail.com`, `yahoo.com`, `outlook.com`, etc.): parsed from `Company: ...` in message body if present; otherwise set to `"Unspecified"`. |
-| `message` | Extracted plain-text body; if HTML only, converted to plain text with HTML tags removed and basic entities decoded. Quoted replies (`> ...`, `On ... wrote:`) stripped. | Prefixed with `Subject: <subject>\n\n`. Truncated at 3,000 characters. If body is empty: `Subject: <subject>` or `[Inbound email inquiry with no text body]`. |
+| `message` | Extracted plain-text body; if HTML only, converted to plain text with HTML tags removed and basic entities decoded. Quoted replies (`> ...`, `On ... wrote:`) stripped. | Prefixed with `Subject: <subject>\n\n`; the subject has whitespace collapsed and is capped at 200 characters (`LeadCreate` itself has no length limits). Body truncated at 3,000 characters. If body is empty: `Subject: <subject>` or `[Inbound email inquiry with no text body]`. |
 | `source` | Hardcoded: `"gmail"`. | Required by API and scoring. |
 | `external_id`| Gmail's stable internal message ID (e.g. `18c9a1f2e3d4b5a6`). | Guarantees database deduplication via `UNIQUE(source, external_id)`. |
 
 ### Automated Notice Rejection
 Before payload construction, the normalization engine checks:
-- `auto-submitted: auto-replied` or `auto-generated` headers
+- an `Auto-Submitted` header with any value other than `no` (RFC 3834; read from n8n's full-line header format, e.g. `Auto-Submitted: auto-replied`)
 - `mailer-daemon@`, `postmaster@`, `noreply@` sender addresses
 - `Automatic reply:`, `Out of Office:`, `Delivery Status Notification`, `Undelivered Mail` subjects
 Matching items are immediately routed to `Log Skipped Message` with reason `automated_notice` and do not consume database or scoring resources.
@@ -141,6 +143,27 @@ Under LeadIntel's heuristic scoring engine (`app/scoring.py`), leads originating
 - When the Gmail Trigger re-polls or reprocesses an already-ingested message, FastAPI detects the duplicate `(source='gmail', external_id=messageId)` composite key and returns `HTTP 409 Conflict`.
 - In `n8n/gmail-lead-intake.json`, the `Route on API Status` switch routes 409 responses to `Log Idempotent Duplicate`.
 - This is classified as an **expected idempotent success**, preventing duplicate rows in PostgreSQL and avoiding workflow failure alerts.
+
+### Timeouts & Retries
+- `Create Lead in FastAPI` retries timeouts and network errors (3 tries, 5 s apart, 30 s timeout each) to ride out a Render cold start. HTTP status responses (201/409/422/401/403/5xx) are not retried; they are routed by `Route on API Status`.
+- After the last failed try the execution fails and is listed under **Executions**. The Gmail Trigger has already advanced its poll cursor, so the message is **not** re-polled automatically: retry the failed execution from the n8n UI. Retrying is safe because a replay of an already-stored message returns 409.
+
+### Known Limitation: 409 After a Timed-Out Create
+A timeout can occur after FastAPI has already handled the request. What has happened at each stage:
+
+| Stage | Database | n8n |
+| :--- | :--- | :--- |
+| 1. First POST: row inserted, scored, response lost | Row exists, `status='new'`, `score` set (scoring runs inside the request) | HTTP node sees a timeout |
+| 2. Retry POST | No new row (`UNIQUE(source, external_id)`) | Receives `409` |
+| 3. `Log Idempotent Duplicate` | Unchanged | Record has `qualification: "not_evaluated"` and a `reviewHint` |
+
+What is skipped is only the n8n-side qualification record (`Log Priority Route` / `Log Normal Route` / `Log Manual Review`). The Gmail workflow has no notification or status-update nodes, so no notification or status update is lost, and the lead's score is in LeadIntel. `tests/test_gmail_workflow.py` fails if a side-effect node is added.
+
+The workflow cannot recover automatically: the 409 body contains only `detail`, the API has no lookup by `(source, external_id)`, and nothing records whether downstream handling finished. Re-running qualification on every 409 would also re-run it for true replays, which becomes a duplicate-notification bug as soon as a notification is added.
+
+Smallest safe design change, required **before** adding notifications to this workflow:
+1. On `DuplicateLeadError`, return the existing lead (`lead_id`, `score`, `status`) in the 409 body.
+2. Add a nullable `processed_at` column with an atomic claim endpoint (e.g. `POST /leads/{id}/claim-processing` that sets `processed_at` only if it is `NULL` and returns whether this caller won). n8n would then run qualification/notifications only after winning the claim, for both 201 and 409.
 
 ---
 
@@ -188,8 +211,11 @@ To connect a pilot Gmail inbox to self-hosted n8n, configure Google Cloud creden
 1. Log into your n8n dashboard (`https://leadintel-n8n.onrender.com`).
 2. Navigate to **Credentials** $\rightarrow$ **Add Credential** $\rightarrow$ search for **Gmail OAuth2 API**.
 3. Paste the **Client ID** and **Client Secret**.
+   - Enable **Custom Scopes** and set **Enabled Scopes** to `https://www.googleapis.com/auth/gmail.readonly` only. The trigger only lists and reads messages and labels, which this scope covers.
 4. Click **Connect my account** and complete Google's authorization prompt using the pilot test user account.
-5. Save the credential with the name: `Gmail account` (credential ID `gmail_oauth_pilot`).
+5. Save the credential (e.g. `Gmail account`). n8n assigns the credential ID; the IDs in `n8n/gmail-lead-intake.json` are placeholders and the real credentials are linked in the UI (Section 7).
+
+**Checking an existing `Gmail account` credential:** n8n 2.41's Gmail OAuth2 credential defaults to `gmail.labels`, `gmail.addons.current.action.compose`, `gmail.addons.current.message.action`, `https://mail.google.com/`, `gmail.modify` and `gmail.compose` unless **Custom Scopes** is on. Open the credential (never copy or export its token data) and confirm **Custom Scopes** is enabled with exactly `https://www.googleapis.com/auth/gmail.readonly`. If it was not, change it, click **Reconnect**, and in the pilot Google account (**Manage your Google Account → Security → Third-party apps & services**) confirm the app now shows read-only Gmail access; remove the old grant if it still lists broader access.
 
 ---
 
@@ -198,16 +224,35 @@ To connect a pilot Gmail inbox to self-hosted n8n, configure Google Cloud creden
 The Gmail workflow artifact is version-controlled at `n8n/gmail-lead-intake.json`.
 
 1. **Non-Destructive Container Import:**
-   - `deploy/docker/Dockerfile.n8n` bundles both `lead-intake.json` and `gmail-lead-intake.json`.
-   - On container boot, `deploy/docker/n8n-entrypoint.sh` checks if `gmail-lead-intake` exists in the database.
-   - If not found, it imports the workflow in an **INACTIVE** state.
-   - If it already exists, the entrypoint preserves the existing record, protecting manual OAuth token bindings from being overwritten on container restart.
-2. **Controlled Verification Before Activation:**
-   - Open the workflow `Gmail Lead Intake & Qualification` in n8n.
-   - Ensure the `Gmail Trigger` node references your newly authorized `Gmail account` credential.
+   - `deploy/docker/Dockerfile.n8n` bundles `lead-intake.json`, `gmail-lead-intake.json` and the helper `deploy/docker/gmail-workflow-import.js`.
+   - On every boot, `deploy/docker/n8n-entrypoint.sh` exports `gmail-lead-intake`. Only n8n's "No workflows found" error counts as missing; then it imports the workflow **INACTIVE**. Any other export error (e.g. database unreachable) logs `ERROR` and skips Gmail provisioning.
+   - If it already exists, it is preserved, so restarts never reset credential bindings or the label selection.
+   - `N8N_FORCE_IMPORT_WORKFLOW` applies to the website workflow `lead-intake` only and never touches the Gmail workflow.
+2. **Updating an Existing Gmail Workflow (`N8N_FORCE_IMPORT_GMAIL_WORKFLOW`, one deploy only):**
+   n8n's importer replaces a workflow's nodes wholesale, which would reset credential bindings to the repository placeholders. The Gmail-only update avoids that:
+   - Imports only `gmail-lead-intake`; `lead-intake` is never imported, deactivated or rebound by it.
+   - Copies each node's credential reference and the Gmail Trigger's label selection from the stored workflow into the imported one.
+   - Stamps the repository file's SHA-256 into the workflow's `meta.leadintelSourceSha256`. If the stored workflow already carries the hash of the file in the image, nothing is imported, so a flag accidentally left set does not re-import on later restarts.
+   - Refuses (logs `ERROR`, imports nothing) while the Gmail workflow is active, because an import deactivates it.
+   - Imports inactive and verifies the result (inactive + hash). On failure it logs `ERROR`, leaves the stored workflow as it was, and n8n still starts so website intake keeps running.
+
+   Procedure:
+   1. Confirm `gmail-lead-intake` is inactive in the n8n UI.
+   2. In Render → `leadintel-n8n` → **Environment**, add `N8N_FORCE_IMPORT_GMAIL_WORKFLOW=true`. Do **not** set `N8N_FORCE_IMPORT_WORKFLOW`.
+   3. Deploy the image that contains the new `n8n/gmail-lead-intake.json`.
+   4. In the deploy log, expect `updating gmail-lead-intake only` followed by `gmail-lead-intake imported inactive`. Any `ERROR` line means nothing was changed.
+   5. **Remove `N8N_FORCE_IMPORT_GMAIL_WORKFLOW` immediately after that deploy.** Leaving it set is harmless for restarts of the same image (logged as `already matches ... Remove N8N_FORCE_IMPORT_GMAIL_WORKFLOW`), but the next deploy with a changed workflow file would import again and replace any other manual edits.
+   6. Do the binding checks in step 3 below; the import keeps existing bindings, but the placeholders remain if nothing was bound before.
+3. **Required Manual Bindings (live workflow only, never committed):**
+   - `Gmail Trigger` → credential → the existing `Gmail account` (read-only scope, Section 6, Step 4).
+   - `Create Lead in FastAPI` → credential → the existing FastAPI Header Auth credential used by the website workflow (`Authorization: Bearer <API_AUTH_TOKEN>`).
+   - `Gmail Trigger` → **Filters** → **Label Names or IDs**: select `LeadIntel_Leads` from the dropdown. The Gmail API filters by label **ID** (e.g. `Label_123…`); the repository stores the label name as a placeholder.
+   - `Gmail Trigger` → **Filters** → **Read Status**: `Unread and read emails` (`both`).
+   - Save the workflow, keep it **inactive**.
+4. **Controlled Verification Before Activation:**
    - Click **Test step** on the `Gmail Trigger` with a test email labeled `LeadIntel_Leads` in your mailbox.
-   - Verify that `Normalize Email Lead` outputs a clean `lead` payload.
-3. **Manual Activation:**
+   - Verify that `Normalize Email Lead` outputs one item per message with a clean `lead` payload, and check `apiBaseUrlSource` (`workflow-default` means `$env` is blocked and the built-in API URL is used).
+5. **Manual Activation:**
    - Once end-to-end execution succeeds in test mode, toggle the workflow switch to **Active**.
 
 ---

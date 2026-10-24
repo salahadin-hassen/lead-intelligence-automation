@@ -8,9 +8,13 @@
 function normalizeGmailLead(item, config) {
   item = item || {};
   const headers = item.headers || {};
+  // The Gmail Trigger (Simplify off) stores each header as its full raw line,
+  // e.g. headers["auto-submitted"] = "Auto-Submitted: auto-replied".
+  const header = (name) =>
+    String(headers[name] || "").replace(new RegExp(`^${name}:\\s*`, "i"), "").trim();
 
   // 1. Resolve message ID (external_id)
-  const messageId = String(item.id || headers["message-id"] || "").trim();
+  const messageId = String(item.id || header("message-id")).trim();
   if (!messageId) {
     return {
       status: "skip",
@@ -30,7 +34,7 @@ function normalizeGmailLead(item, config) {
     const val = item.from.value[0];
     rawFrom = val.name ? `${val.name} <${val.address}>` : (val.address || "");
   } else if (typeof headers.from === "string") {
-    rawFrom = headers.from;
+    rawFrom = header("from");
   }
 
   rawFrom = rawFrom.trim();
@@ -63,16 +67,16 @@ function normalizeGmailLead(item, config) {
   }
 
   // 3. Resolve Subject
-  const subject = String(item.subject || headers.subject || "").trim();
+  const subject = String(item.subject || header("subject")).trim();
 
   // 4. Automated notice / bounce / auto-reply detection
   const lowerSubject = subject.toLowerCase();
   const lowerFrom = rawFrom.toLowerCase();
-  const autoSubmitted = String(headers["auto-submitted"] || "").toLowerCase();
+  const autoSubmitted = header("auto-submitted").toLowerCase().split(";")[0].trim();
 
   const isAutomated = (
-    autoSubmitted === "auto-replied" ||
-    autoSubmitted === "auto-generated" ||
+    // RFC 3834: any Auto-Submitted value other than "no" marks an automated message
+    (autoSubmitted !== "" && autoSubmitted !== "no") ||
     lowerFrom.includes("mailer-daemon@") ||
     lowerFrom.includes("postmaster@") ||
     lowerFrom.includes("noreply@") ||
@@ -136,8 +140,14 @@ function normalizeGmailLead(item, config) {
     cleanedBody = cleanedBody.slice(0, 3000) + "… [truncated]";
   }
 
-  const finalMessage = subject
-    ? (cleanedBody ? `Subject: ${subject}\n\n${cleanedBody}` : `Subject: ${subject}`)
+  // LeadCreate has no field length limits, so the subject is capped here like the body
+  let subjectLine = subject.replace(/\s+/g, " ");
+  if (subjectLine.length > 200) {
+    subjectLine = subjectLine.slice(0, 200) + "… [truncated]";
+  }
+
+  const finalMessage = subjectLine
+    ? (cleanedBody ? `Subject: ${subjectLine}\n\n${cleanedBody}` : `Subject: ${subjectLine}`)
     : (cleanedBody || "[Inbound email inquiry with no text body]");
 
   // 6. Name derivation
@@ -181,7 +191,9 @@ function normalizeGmailLead(item, config) {
     }
   }
 
-  const apiBase = (config && config.apiBaseUrl) || process.env.LEAD_API_BASE_URL || "https://leadintel-api-2y0i.onrender.com";
+  // `process` is not guaranteed inside the n8n Code node sandbox; the node passes config.apiBaseUrl.
+  const envBase = typeof process !== "undefined" && process.env ? process.env.LEAD_API_BASE_URL : "";
+  const apiBase = (config && config.apiBaseUrl) || envBase || "https://leadintel-api-2y0i.onrender.com";
   const apiLeadsUrl = `${apiBase.replace(/\/+$/, "")}/leads`;
 
   return {

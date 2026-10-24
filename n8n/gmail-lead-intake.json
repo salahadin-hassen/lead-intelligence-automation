@@ -13,7 +13,7 @@
         },
         "simple": false,
         "filters": {
-          "readStatus": "all",
+          "readStatus": "both",
           "labelIds": [
             "LeadIntel_Leads"
           ],
@@ -41,8 +41,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Normalize raw inbound Gmail message into LeadIntel schema\nconst item = $input.first().json || {};\nconst headers = item.headers || {};\n\n// 1. Resolve message ID (external_id)\nconst messageId = String(item.id || headers[\"message-id\"] || \"\").trim();\nif (!messageId) {\n  return [{\n    json: {\n      status: \"skip\",\n      reason: \"malformed_data\",\n      detail: \"Missing stable Gmail message ID\",\n      messageId: null\n    }\n  }];\n}\n\n// 2. Resolve From header and extract email & display name\nlet rawFrom = \"\";\nif (typeof item.from === \"string\") {\n  rawFrom = item.from;\n} else if (item.from && typeof item.from.text === \"string\") {\n  rawFrom = item.from.text;\n} else if (item.from && Array.isArray(item.from.value) && item.from.value[0]) {\n  const val = item.from.value[0];\n  rawFrom = val.name ? `${val.name} <${val.address}>` : (val.address || \"\");\n} else if (typeof headers.from === \"string\") {\n  rawFrom = headers.from;\n}\nrawFrom = rawFrom.trim();\n\nlet senderName = \"\";\nlet senderEmail = \"\";\n\nconst angleMatch = rawFrom.match(/^(.*?)\\s*<([^>]+)>$/);\nif (angleMatch) {\n  senderName = angleMatch[1].replace(/^[\\\"\\'\\s]+|[\\\"\\'\\s]+$/g, \"\").trim();\n  senderEmail = angleMatch[2].trim();\n} else if (/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(rawFrom)) {\n  senderEmail = rawFrom;\n} else {\n  const match = rawFrom.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})/);\n  if (match) {\n    senderEmail = match[1];\n    senderName = rawFrom.replace(match[0], \"\").replace(/[<>()\\\"\\']/g, \"\").trim();\n  }\n}\n\n// Basic email validation\nif (!senderEmail || !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/.test(senderEmail)) {\n  return [{\n    json: {\n      status: \"skip\",\n      reason: \"malformed_data\",\n      detail: \"Missing or unparseable sender email in From header\",\n      messageId\n    }\n  }];\n}\n\n// 3. Resolve Subject\nconst subject = String(item.subject || headers.subject || \"\").trim();\n\n// 4. Automated notice / bounce / auto-reply detection\nconst lowerSubject = subject.toLowerCase();\nconst lowerFrom = rawFrom.toLowerCase();\nconst autoSubmitted = String(headers[\"auto-submitted\"] || \"\").toLowerCase();\n\nconst isAutomated = (\n  autoSubmitted === \"auto-replied\" ||\n  autoSubmitted === \"auto-generated\" ||\n  lowerFrom.includes(\"mailer-daemon@\") ||\n  lowerFrom.includes(\"postmaster@\") ||\n  lowerFrom.includes(\"noreply@\") ||\n  lowerFrom.includes(\"no-reply@\") ||\n  lowerSubject.startsWith(\"automatic reply:\") ||\n  lowerSubject.startsWith(\"out of office:\") ||\n  lowerSubject.includes(\"delivery status notification\") ||\n  lowerSubject.includes(\"undelivered mail\") ||\n  lowerSubject.includes(\"failure notice\")\n);\n\nif (isAutomated) {\n  return [{\n    json: {\n      status: \"skip\",\n      reason: \"automated_notice\",\n      detail: \"Detected automated notice, delivery failure, or out-of-office message\",\n      messageId,\n      senderEmail,\n      subject\n    }\n  }];\n}\n\n// 5. Body Extraction and Cleaning\nlet rawBody = \"\";\nif (typeof item.text === \"string\" && item.text.trim()) {\n  rawBody = item.text;\n} else if (typeof item.html === \"string\" && item.html.trim()) {\n  rawBody = item.html\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, \"\")\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, \"\")\n    .replace(/<br\\s*[\\/]?>/gi, \"\\n\")\n    .replace(/<\\/(p|div|tr|li|h[1-6])>/gi, \"\\n\")\n    .replace(/<[^>]+>/g, \"\")\n    .replace(/&nbsp;/gi, \" \")\n    .replace(/&amp;/gi, \"&\")\n    .replace(/&lt;/gi, \"<\")\n    .replace(/&gt;/gi, \">\")\n    .replace(/&quot;/gi, \"\\\"\")\n    .replace(/&#39;/gi, \"'\");\n} else if (typeof item.snippet === \"string\") {\n  rawBody = item.snippet;\n}\n\n// Strip reply chains & email quotes\nconst bodyLines = rawBody.split(/\\r?\\n/);\nconst cleanedLines = [];\nfor (const line of bodyLines) {\n  const trimmed = line.replace(/[ \\t]+/g, \" \").trim();\n  if (/^>/.test(trimmed)) continue;\n  if (/^on\\s+.*wrote:$/i.test(trimmed)) break;\n  if (/^-----Original Message-----/i.test(trimmed)) break;\n  if (/^From:\\s.*Sent:\\s/i.test(trimmed)) break;\n  cleanedLines.push(trimmed);\n}\n\nlet cleanedBody = cleanedLines.join(\"\\n\").replace(/\\n{3,}/g, \"\\n\\n\").trim();\nif (cleanedBody.length > 3000) {\n  cleanedBody = cleanedBody.slice(0, 3000) + \"\u2026 [truncated]\";\n}\n\nconst finalMessage = subject\n  ? (cleanedBody ? `Subject: ${subject}\\n\\n${cleanedBody}` : `Subject: ${subject}`)\n  : (cleanedBody || \"[Inbound email inquiry with no text body]\");\n\n// 6. Name derivation\nif (!senderName) {\n  const localPart = senderEmail.split(\"@\")[0].replace(/[._+-]+/g, \" \").trim();\n  if (localPart && !/^\\d+$/.test(localPart)) {\n    senderName = localPart\n      .split(\" \")\n      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())\n      .join(\" \");\n  } else {\n    senderName = \"Direct Inquirer\";\n  }\n}\n\n// 7. Company derivation\nconst freeMailDomains = new Set([\n  \"gmail.com\", \"googlemail.com\", \"yahoo.com\", \"yahoo.co.uk\", \"hotmail.com\",\n  \"outlook.com\", \"live.com\", \"msn.com\", \"icloud.com\", \"me.com\", \"proton.me\",\n  \"protonmail.com\", \"aol.com\", \"mail.com\", \"gmx.com\", \"zoho.com\", \"yandex.com\"\n]);\n\nconst domain = senderEmail.split(\"@\")[1].toLowerCase();\nlet company = \"\";\n\nif (!freeMailDomains.has(domain)) {\n  const mainPart = domain.split(\".\")[0];\n  company = mainPart\n    .replace(/[-_]+/g, \" \")\n    .split(\" \")\n    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())\n    .join(\" \");\n} else {\n  const compMatch = cleanedBody.match(/\\b(?:company|organization|firm|agency)\\s*[:=-]\\s*([^\\r\\n,]+)/i);\n  if (compMatch && compMatch[1].trim()) {\n    company = compMatch[1].trim();\n  } else {\n    company = \"Unspecified\";\n  }\n}\n\nconst apiBase = ($env.LEAD_API_BASE_URL || \"https://leadintel-api-2y0i.onrender.com\").replace(/\\/+$/, \"\");\n\nreturn [{\n  json: {\n    status: \"valid\",\n    lead: {\n      name: senderName,\n      email: senderEmail,\n      company: company,\n      message: finalMessage,\n      source: \"gmail\",\n      external_id: messageId\n    },\n    apiLeadsUrl: `${apiBase}/leads`,\n    qualifiedThreshold: 70,\n    thresholdSource: \"default_policy\"\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Normalize one inbound Gmail message into the LeadIntel LeadCreate schema.\n// normalizeGmailLead is a verbatim copy of n8n/normalize-gmail.js; the test\n// suite fails if the two drift apart.\nfunction normalizeGmailLead(item, config) {\n  item = item || {};\n  const headers = item.headers || {};\n  // The Gmail Trigger (Simplify off) stores each header as its full raw line,\n  // e.g. headers[\"auto-submitted\"] = \"Auto-Submitted: auto-replied\".\n  const header = (name) =>\n    String(headers[name] || \"\").replace(new RegExp(`^${name}:\\\\s*`, \"i\"), \"\").trim();\n\n  // 1. Resolve message ID (external_id)\n  const messageId = String(item.id || header(\"message-id\")).trim();\n  if (!messageId) {\n    return {\n      status: \"skip\",\n      reason: \"malformed_data\",\n      detail: \"Missing stable Gmail message ID\",\n      item: { id: null }\n    };\n  }\n\n  // 2. Resolve From header and extract email & display name\n  let rawFrom = \"\";\n  if (typeof item.from === \"string\") {\n    rawFrom = item.from;\n  } else if (item.from && typeof item.from.text === \"string\") {\n    rawFrom = item.from.text;\n  } else if (item.from && Array.isArray(item.from.value) && item.from.value[0]) {\n    const val = item.from.value[0];\n    rawFrom = val.name ? `${val.name} <${val.address}>` : (val.address || \"\");\n  } else if (typeof headers.from === \"string\") {\n    rawFrom = header(\"from\");\n  }\n\n  rawFrom = rawFrom.trim();\n\n  let senderName = \"\";\n  let senderEmail = \"\";\n\n  const angleMatch = rawFrom.match(/^(.*?)\\s*<([^>]+)>$/);\n  if (angleMatch) {\n    senderName = angleMatch[1].replace(/^[\"'\\s]+|[\"'\\s]+$/g, \"\").trim();\n    senderEmail = angleMatch[2].trim();\n  } else if (/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(rawFrom)) {\n    senderEmail = rawFrom;\n  } else {\n    const match = rawFrom.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})/);\n    if (match) {\n      senderEmail = match[1];\n      senderName = rawFrom.replace(match[0], \"\").replace(/[<>()\"']/g, \"\").trim();\n    }\n  }\n\n  // Basic email validation\n  if (!senderEmail || !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/.test(senderEmail)) {\n    return {\n      status: \"skip\",\n      reason: \"malformed_data\",\n      detail: \"Missing or unparseable sender email in From header\",\n      messageId\n    };\n  }\n\n  // 3. Resolve Subject\n  const subject = String(item.subject || header(\"subject\")).trim();\n\n  // 4. Automated notice / bounce / auto-reply detection\n  const lowerSubject = subject.toLowerCase();\n  const lowerFrom = rawFrom.toLowerCase();\n  const autoSubmitted = header(\"auto-submitted\").toLowerCase().split(\";\")[0].trim();\n\n  const isAutomated = (\n    // RFC 3834: any Auto-Submitted value other than \"no\" marks an automated message\n    (autoSubmitted !== \"\" && autoSubmitted !== \"no\") ||\n    lowerFrom.includes(\"mailer-daemon@\") ||\n    lowerFrom.includes(\"postmaster@\") ||\n    lowerFrom.includes(\"noreply@\") ||\n    lowerFrom.includes(\"no-reply@\") ||\n    lowerSubject.startsWith(\"automatic reply:\") ||\n    lowerSubject.startsWith(\"out of office:\") ||\n    lowerSubject.includes(\"delivery status notification\") ||\n    lowerSubject.includes(\"undelivered mail\") ||\n    lowerSubject.includes(\"failure notice\")\n  );\n\n  if (isAutomated) {\n    return {\n      status: \"skip\",\n      reason: \"automated_notice\",\n      detail: \"Detected automated notice, delivery failure, or out-of-office message\",\n      messageId,\n      senderEmail,\n      subject\n    };\n  }\n\n  // 5. Body Extraction and Cleaning\n  let rawBody = \"\";\n  if (typeof item.text === \"string\" && item.text.trim()) {\n    rawBody = item.text;\n  } else if (typeof item.html === \"string\" && item.html.trim()) {\n    // Convert HTML to clean plain text\n    rawBody = item.html\n      .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, \"\")\n      .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, \"\")\n      .replace(/<br\\s*[\\/]?>/gi, \"\\n\")\n      .replace(/<\\/(p|div|tr|li|h[1-6])>/gi, \"\\n\")\n      .replace(/<[^>]+>/g, \"\")\n      .replace(/&nbsp;/gi, \" \")\n      .replace(/&amp;/gi, \"&\")\n      .replace(/&lt;/gi, \"<\")\n      .replace(/&gt;/gi, \">\")\n      .replace(/&quot;/gi, \"\\\"\")\n      .replace(/&#39;/gi, \"'\");\n  } else if (typeof item.snippet === \"string\") {\n    rawBody = item.snippet;\n  }\n\n  // Strip reply chains & email quotes\n  const bodyLines = rawBody.split(/\\r?\\n/);\n  const cleanedLines = [];\n  for (const line of bodyLines) {\n    const trimmed = line.replace(/[ \\t]+/g, \" \").trim();\n    // Stop or strip quoted lines\n    if (/^>/.test(trimmed)) continue;\n    if (/^on\\s+.*wrote:$/i.test(trimmed)) break;\n    if (/^-----Original Message-----/i.test(trimmed)) break;\n    if (/^From:\\s.*Sent:\\s/i.test(trimmed)) break;\n    cleanedLines.push(trimmed);\n  }\n\n  let cleanedBody = cleanedLines.join(\"\\n\").replace(/\\n{3,}/g, \"\\n\\n\").trim();\n  // Safe sensible length cap (3000 chars)\n  if (cleanedBody.length > 3000) {\n    cleanedBody = cleanedBody.slice(0, 3000) + \"\u2026 [truncated]\";\n  }\n\n  // LeadCreate has no field length limits, so the subject is capped here like the body\n  let subjectLine = subject.replace(/\\s+/g, \" \");\n  if (subjectLine.length > 200) {\n    subjectLine = subjectLine.slice(0, 200) + \"\u2026 [truncated]\";\n  }\n\n  const finalMessage = subjectLine\n    ? (cleanedBody ? `Subject: ${subjectLine}\\n\\n${cleanedBody}` : `Subject: ${subjectLine}`)\n    : (cleanedBody || \"[Inbound email inquiry with no text body]\");\n\n  // 6. Name derivation\n  if (!senderName) {\n    const localPart = senderEmail.split(\"@\")[0].replace(/[._+-]+/g, \" \").trim();\n    if (localPart && !/^\\d+$/.test(localPart)) {\n      senderName = localPart\n        .split(\" \")\n        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())\n        .join(\" \");\n    } else {\n      senderName = \"Direct Inquirer\";\n    }\n  }\n\n  // 7. Company derivation\n  const freeMailDomains = new Set([\n    \"gmail.com\", \"googlemail.com\", \"yahoo.com\", \"yahoo.co.uk\", \"hotmail.com\",\n    \"outlook.com\", \"live.com\", \"msn.com\", \"icloud.com\", \"me.com\", \"proton.me\",\n    \"protonmail.com\", \"aol.com\", \"mail.com\", \"gmx.com\", \"zoho.com\", \"yandex.com\"\n  ]);\n\n  const domain = senderEmail.split(\"@\")[1].toLowerCase();\n  let company = \"\";\n\n  if (!freeMailDomains.has(domain)) {\n    // Derive corporate company name from domain (e.g. \"acme-corp.co.uk\" -> \"Acme Corp\")\n    const mainPart = domain.split(\".\")[0];\n    company = mainPart\n      .replace(/[-_]+/g, \" \")\n      .split(\" \")\n      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())\n      .join(\" \");\n  } else {\n    // Check if message explicitly mentions \"Company: ...\"\n    const compMatch = cleanedBody.match(/\\b(?:company|organization|firm|agency)\\s*[:=-]\\s*([^\\r\\n,]+)/i);\n    if (compMatch && compMatch[1].trim()) {\n      company = compMatch[1].trim();\n    } else {\n      company = \"Unspecified\";\n    }\n  }\n\n  // `process` is not guaranteed inside the n8n Code node sandbox; the node passes config.apiBaseUrl.\n  const envBase = typeof process !== \"undefined\" && process.env ? process.env.LEAD_API_BASE_URL : \"\";\n  const apiBase = (config && config.apiBaseUrl) || envBase || \"https://leadintel-api-2y0i.onrender.com\";\n  const apiLeadsUrl = `${apiBase.replace(/\\/+$/, \"\")}/leads`;\n\n  return {\n    status: \"valid\",\n    lead: {\n      name: senderName,\n      email: senderEmail,\n      company: company,\n      message: finalMessage,\n      source: \"gmail\",\n      external_id: messageId\n    },\n    apiLeadsUrl: apiLeadsUrl,\n    qualifiedThreshold: (config && config.qualifiedThreshold) || 70,\n    thresholdSource: (config && config.thresholdSource) || \"default_policy\"\n  };\n}\n\n// n8n 2.x blocks $env unless N8N_BLOCK_ENV_ACCESS_IN_NODE=false; fall back\n// to the default API instead of failing the execution.\nlet apiBaseUrl = \"https://leadintel-api-2y0i.onrender.com\";\nlet apiBaseUrlSource = \"workflow-default\";\ntry {\n  if ($env.LEAD_API_BASE_URL) {\n    apiBaseUrl = String($env.LEAD_API_BASE_URL);\n    apiBaseUrlSource = \"environment\";\n  }\n} catch (err) {\n  apiBaseUrlSource = \"workflow-default (n8n blocks $env access)\";\n}\n\nreturn { json: { ...normalizeGmailLead($input.item.json, { apiBaseUrl }), apiBaseUrlSource } };"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000002",
       "name": "Normalize Email Lead",
@@ -97,8 +97,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Log skipped messages (e.g. automated bounce, out-of-office, missing sender)\nconst skipped = $input.first().json || {};\nreturn [{\n  json: {\n    event: 'gmail_message_skipped',\n    reason: skipped.reason || 'unknown',\n    detail: skipped.detail || null,\n    messageId: skipped.messageId || null,\n    senderEmail: skipped.senderEmail || null,\n    subject: skipped.subject || null,\n    timestamp: new Date().toISOString()\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Log skipped messages (e.g. automated bounce, out-of-office, missing sender)\nconst skipped = $input.item.json || {};\nreturn {\n  json: {\n    event: 'gmail_message_skipped',\n    reason: skipped.reason || 'unknown',\n    detail: skipped.detail || null,\n    messageId: skipped.messageId || null,\n    senderEmail: skipped.senderEmail || null,\n    subject: skipped.subject || null,\n    timestamp: new Date().toISOString()\n  }\n};"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000004",
       "name": "Log Skipped Message",
@@ -134,7 +134,7 @@
               "neverError": true
             }
           },
-          "timeout": 15000
+          "timeout": 30000
         }
       },
       "id": "6a1d2b10-0000-4000-8000-000000000005",
@@ -150,7 +150,10 @@
           "id": "fastapi_auth_token",
           "name": "Header Auth account"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -274,8 +277,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Idempotent duplicate: same (source=gmail, external_id=messageId) already ingested\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\nconst config = $('Normalize Email Lead').first().json || {};\nconst extId = (config.lead && config.lead.external_id) || null;\n\nreturn [{\n  json: {\n    event: 'gmail_lead_duplicate',\n    status: 'duplicate_idempotent',\n    external_id: extId,\n    statusCode: http.statusCode,\n    detail: body.detail || 'A lead with this source and external_id already exists',\n    timestamp: new Date().toISOString()\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Idempotent duplicate: same (source=gmail, external_id=messageId) already stored.\n// The 409 body carries no lead id or score, so this branch cannot tell a replay\n// of a fully handled message from a retry after a timed-out create whose\n// qualification never ran here. The record says so instead of implying success.\nconst http = $input.item.json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\nconst config = $('Normalize Email Lead').item.json || {};\nconst extId = (config.lead && config.lead.external_id) || null;\n\nreturn {\n  json: {\n    event: 'gmail_lead_duplicate',\n    status: 'duplicate_idempotent',\n    external_id: extId,\n    statusCode: http.statusCode,\n    detail: body.detail || 'A lead with this source and external_id already exists',\n    qualification: 'not_evaluated',\n    reviewHint: 'If this execution retried Create Lead in FastAPI, the lead was created by an earlier attempt; check its score in LeadIntel.',\n    timestamp: new Date().toISOString()\n  }\n};"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000007",
       "name": "Log Idempotent Duplicate",
@@ -288,8 +291,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// FastAPI rejected payload with 422 Unprocessable Entity\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\nconst config = $('Normalize Email Lead').first().json || {};\n\nreturn [{\n  json: {\n    event: 'gmail_lead_validation_failed',\n    status: 'rejected',\n    statusCode: http.statusCode,\n    validationErrors: body.detail || null,\n    lead: config.lead || null,\n    timestamp: new Date().toISOString()\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// FastAPI rejected payload with 422 Unprocessable Entity\nconst http = $input.item.json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\nconst config = $('Normalize Email Lead').item.json || {};\n\nreturn {\n  json: {\n    event: 'gmail_lead_validation_failed',\n    status: 'rejected',\n    statusCode: http.statusCode,\n    validationErrors: body.detail || null,\n    lead: config.lead || null,\n    timestamp: new Date().toISOString()\n  }\n};"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000008",
       "name": "Log Validation Failure",
@@ -302,8 +305,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// FastAPI rejected API authentication with 401/403\nconst http = $input.first().json || {};\n\nreturn [{\n  json: {\n    event: 'gmail_lead_auth_error',\n    status: 'auth_failed',\n    statusCode: http.statusCode,\n    message: 'FastAPI rejected the n8n Header Auth token. Please verify API_AUTH_TOKEN.',\n    timestamp: new Date().toISOString()\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// FastAPI rejected API authentication with 401/403\nconst http = $input.item.json || {};\n\nreturn {\n  json: {\n    event: 'gmail_lead_auth_error',\n    status: 'auth_failed',\n    statusCode: http.statusCode,\n    message: 'FastAPI rejected the n8n Header Auth token. Please verify API_AUTH_TOKEN.',\n    timestamp: new Date().toISOString()\n  }\n};"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000009",
       "name": "Log Auth Error",
@@ -316,8 +319,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Upstream failure: 5xx, timeout, or network drop\nconst http = $input.first().json || {};\n\nreturn [{\n  json: {\n    event: 'gmail_lead_upstream_error',\n    status: 'upstream_failure',\n    statusCode: http.statusCode || null,\n    message: 'The lead API was unreachable or returned an upstream error.',\n    timestamp: new Date().toISOString()\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Upstream failure: 5xx or other unexpected status. Timeouts and network\n// errors are retried by the HTTP node, then fail the execution.\nconst http = $input.item.json || {};\n\nreturn {\n  json: {\n    event: 'gmail_lead_upstream_error',\n    status: 'upstream_failure',\n    statusCode: http.statusCode || null,\n    message: 'The lead API was unreachable or returned an upstream error.',\n    timestamp: new Date().toISOString()\n  }\n};"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000010",
       "name": "Log Upstream Error",
@@ -330,8 +333,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Extract lead and score from 201 Created response\nconst http = $input.first().json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\n\nconst rawScore = body.score;\nconst score = (typeof rawScore === 'number' && Number.isFinite(rawScore))\n  ? rawScore\n  : null;\n\nreturn [{\n  json: {\n    apiStatus: typeof http.statusCode === 'number' ? http.statusCode : null,\n    leadId: body.lead_id ?? null,\n    name: body.name ?? null,\n    email: body.email ?? null,\n    company: body.company ?? null,\n    source: body.source ?? 'gmail',\n    score,\n    scoreReason: body.score_reason ?? null\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Extract lead and score from 201 Created response\nconst http = $input.item.json || {};\nconst body = (http.body && typeof http.body === 'object') ? http.body : {};\n\nconst rawScore = body.score;\nconst score = (typeof rawScore === 'number' && Number.isFinite(rawScore))\n  ? rawScore\n  : null;\n\nreturn {\n  json: {\n    apiStatus: typeof http.statusCode === 'number' ? http.statusCode : null,\n    leadId: body.lead_id ?? null,\n    name: body.name ?? null,\n    email: body.email ?? null,\n    company: body.company ?? null,\n    source: body.source ?? 'gmail',\n    score,\n    scoreReason: body.score_reason ?? null\n  }\n};"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000011",
       "name": "Extract Lead + Score",
@@ -344,8 +347,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Qualification decision based on configured threshold\nconst config = $('Normalize Email Lead').first().json || {};\nconst threshold = config.qualifiedThreshold || 70;\nconst extracted = $input.first().json || {};\nconst score = extracted.score;\n\nconst thresholdOk = typeof threshold === 'number' && Number.isFinite(threshold);\n\nlet qualification;\nlet priority;\nif (!thresholdOk || typeof score !== 'number' || !Number.isFinite(score)) {\n  qualification = 'manual_review';\n  priority = null;\n} else if (score >= threshold) {\n  qualification = 'qualified';\n  priority = 'high';\n} else {\n  qualification = 'not_qualified';\n  priority = 'normal';\n}\n\nreturn [{\n  json: {\n    ...extracted,\n    qualification,\n    priority,\n    qualifiedThreshold: thresholdOk ? threshold : null,\n    thresholdSource: config.thresholdSource ?? 'unknown'\n  }\n}];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Qualification decision based on configured threshold\nconst config = $('Normalize Email Lead').item.json || {};\nconst threshold = config.qualifiedThreshold || 70;\nconst extracted = $input.item.json || {};\nconst score = extracted.score;\n\nconst thresholdOk = typeof threshold === 'number' && Number.isFinite(threshold);\n\nlet qualification;\nlet priority;\nif (!thresholdOk || typeof score !== 'number' || !Number.isFinite(score)) {\n  qualification = 'manual_review';\n  priority = null;\n} else if (score >= threshold) {\n  qualification = 'qualified';\n  priority = 'high';\n} else {\n  qualification = 'not_qualified';\n  priority = 'normal';\n}\n\nreturn {\n  json: {\n    ...extracted,\n    qualification,\n    priority,\n    qualifiedThreshold: thresholdOk ? threshold : null,\n    thresholdSource: config.thresholdSource ?? 'unknown'\n  }\n};"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000012",
       "name": "Qualification",
@@ -446,8 +449,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Priority-branch operational record for a qualified Gmail lead\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'gmail_lead_qualified',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'qualified',\n  priority: lead.priority ?? 'high',\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn [{ json: record }];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Priority-branch operational record for a qualified Gmail lead\nconst lead = $input.item.json || {};\n\nconst record = {\n  event: 'gmail_lead_qualified',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'qualified',\n  priority: lead.priority ?? 'high',\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn { json: record };"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000014",
       "name": "Log Priority Route",
@@ -460,8 +463,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Normal-branch operational record for a non-qualified Gmail lead\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'gmail_lead_not_qualified',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'not_qualified',\n  priority: lead.priority ?? 'normal',\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn [{ json: record }];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Normal-branch operational record for a non-qualified Gmail lead\nconst lead = $input.item.json || {};\n\nconst record = {\n  event: 'gmail_lead_not_qualified',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: lead.qualification ?? 'not_qualified',\n  priority: lead.priority ?? 'normal',\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn { json: record };"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000015",
       "name": "Log Normal Route",
@@ -474,8 +477,8 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// Manual review operational record (score is null/unparseable or scoring failed)\nconst lead = $input.first().json || {};\n\nconst record = {\n  event: 'gmail_lead_manual_review',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: 'manual_review',\n  priority: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn [{ json: record }];"
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Manual review operational record (score is null/unparseable or scoring failed)\nconst lead = $input.item.json || {};\n\nconst record = {\n  event: 'gmail_lead_manual_review',\n  leadId: lead.leadId ?? null,\n  name: lead.name ?? null,\n  email: lead.email ?? null,\n  company: lead.company ?? null,\n  source: lead.source ?? 'gmail',\n  score: lead.score ?? null,\n  scoreReason: lead.scoreReason ?? null,\n  qualification: 'manual_review',\n  priority: null,\n  qualifiedThreshold: lead.qualifiedThreshold ?? null\n};\n\nreturn { json: record };"
       },
       "id": "6a1d2b10-0000-4000-8000-000000000016",
       "name": "Log Manual Review",
