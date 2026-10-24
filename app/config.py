@@ -15,6 +15,16 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_base_url: str | None = None
     llm_model: str = "openrouter/free"
+    # Optional AI lead insights (app/insights.py). Separate from LLM_API_KEY on
+    # purpose: setting LLM_API_KEY makes the LLM replace the deterministic score.
+    ai_insights_enabled: bool = False
+    openai_api_key: str | None = None
+    ai_insights_model: str = "gpt-6-luna"
+    ai_insights_reasoning_effort: str = "none"
+    ai_insights_base_url: str = "https://api.openai.com/v1"
+    ai_insights_timeout_seconds: float = 15.0
+    ai_insights_max_output_tokens: int = 300
+    ai_insights_max_input_chars: int = 2000
     app_env: str = "development"
     render: bool = False
     api_auth_token: str | None = None

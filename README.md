@@ -192,5 +192,6 @@ cp .env.example .env
 - [**Recruiter / Client Evaluation Guide**](docs/project-evaluation-guide.md) — 5-to-10 minute code tour for technical reviewers.
 - [**Technical Case Study & Incident Log**](docs/case-study.md) — Deep dive into 3 verified engineering incident resolutions and fault-injection drills.
 - [**Deployment & Rehearsal Guide**](docs/deployment.md) — Service units, Caddy configuration, failure drills, and verification ledger.
+- [**AI Lead Insights**](docs/ai-lead-insights.md) — Optional OpenAI summary, intent, urgency and next action per lead; off by default, never changes the deterministic score.
 - [**n8n Integration Guide**](docs/n8n-integration.md) — Complete workflow contract, node execution order, Telegram, and WhatsApp configuration.
 - [**Lead Form Source**](demo/lead-form.html) — Client-facing responsive portal implementation.

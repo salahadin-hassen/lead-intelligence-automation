@@ -8,11 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app import db, scoring
+from app import db, insights, scoring
 from app.config import Settings, get_settings
 from app.errors import DuplicateLeadError
+from app.insights import InsightsGenerator
 from app.models import (
+    AiInsights,
     LeadCreate,
+    LeadInsightsResponse,
     LeadListResponse,
     LeadResponse,
     LeadStatusUpdate,
@@ -203,6 +206,82 @@ def get_lead(lead_id: int) -> LeadResponse:
             detail="Lead not found",
         )
     return _to_response(row)
+
+
+def get_insights_generator() -> InsightsGenerator:
+    return insights.generate_insights
+
+
+def _insights_response(lead_id: int, row: dict, *, cached: bool) -> LeadInsightsResponse:
+    stored = row.get("ai_insights")
+    return LeadInsightsResponse(
+        lead_id=lead_id,
+        status=row.get("ai_status") or "not_requested",
+        # Stored JSON was validated before it was written; validate again on read.
+        insights=AiInsights.model_validate(stored) if stored else None,
+        model=row.get("ai_model"),
+        error=row.get("ai_error"),
+        usage=row.get("ai_usage"),
+        updated_at=row.get("ai_updated_at"),
+        cached=cached,
+    )
+
+
+@router.get("/leads/{lead_id}/insights", response_model=LeadInsightsResponse)
+def get_lead_insights(lead_id: int) -> LeadInsightsResponse:
+    """Read stored AI insights; never calls the model."""
+    row = db.get_lead_insights(lead_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    return _insights_response(lead_id, row, cached=True)
+
+
+@router.post("/leads/{lead_id}/insights", response_model=LeadInsightsResponse)
+def create_lead_insights(
+    lead_id: int,
+    retry: bool = False,
+    settings: Settings = Depends(get_settings),
+    generator: InsightsGenerator = Depends(get_insights_generator),
+) -> LeadInsightsResponse:
+    """Generate AI insights once per lead (stored results are returned as-is).
+
+    Every handled outcome answers 200 with a status: disabled, pending,
+    completed or failed (with an error code). A failed attempt is only
+    repeated with ?retry=true. The deterministic score is never touched.
+    """
+    row = db.get_lead_insights(lead_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    if row.get("ai_status") == "completed":
+        return _insights_response(lead_id, row, cached=True)
+    if not settings.ai_insights_enabled or not settings.openai_api_key:
+        return LeadInsightsResponse(
+            lead_id=lead_id,
+            status="disabled",
+            error=None if not settings.ai_insights_enabled else "not_configured",
+        )
+
+    stale_seconds = settings.ai_insights_timeout_seconds + 60
+    if not db.claim_lead_insights(lead_id, retry=retry, stale_seconds=stale_seconds):
+        return _insights_response(lead_id, db.get_lead_insights(lead_id) or row, cached=True)
+
+    try:
+        outcome = generator(row, settings)
+    except Exception:
+        # The generator handles provider errors; this only guards the claim.
+        logger.exception("AI insights generator failed unexpectedly")
+        outcome = insights.InsightsOutcome(
+            insights=None, error="internal_error", model=settings.ai_insights_model
+        )
+    finished = db.finish_lead_insights(
+        lead_id,
+        status="completed" if outcome.insights is not None else "failed",
+        insights=outcome.insights.model_dump() if outcome.insights is not None else None,
+        model=outcome.model,
+        error=outcome.error,
+        usage=outcome.usage,
+    )
+    return _insights_response(lead_id, finished or db.get_lead_insights(lead_id) or row, cached=False)
 
 
 @router.patch("/leads/{lead_id}", response_model=LeadResponse)

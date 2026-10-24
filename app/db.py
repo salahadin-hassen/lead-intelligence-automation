@@ -10,6 +10,7 @@ from pathlib import Path
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from app.errors import DuplicateLeadError
@@ -223,6 +224,75 @@ def export_leads(status: str | None, source: str | None) -> list[dict]:
         with conn.cursor(row_factory=dict_row) as cur:
             rows = cur.execute(_EXPORT_LEADS_SQL, params).fetchall()
     return [dict(row) for row in rows]
+
+
+_GET_LEAD_INSIGHTS_SQL = """
+    SELECT id, company, message, source, ai_status, ai_insights, ai_model, ai_error, ai_usage, ai_updated_at
+    FROM leads
+    WHERE id = %s
+"""
+
+# Takes the one-call-per-lead claim. Never-requested leads are claimable; a
+# failed attempt only with retry; a stale 'pending' (process died mid-call)
+# after %(stale_seconds)s. 'completed' is never claimable.
+_CLAIM_LEAD_INSIGHTS_SQL = """
+    UPDATE leads
+    SET ai_status = 'pending', ai_error = NULL, ai_updated_at = CURRENT_TIMESTAMP
+    WHERE id = %(id)s
+      AND (ai_status IS NULL
+           OR (ai_status = 'failed' AND %(retry)s)
+           OR (ai_status = 'pending'
+               AND ai_updated_at < CURRENT_TIMESTAMP - make_interval(secs => %(stale_seconds)s)))
+    RETURNING id
+"""
+
+_FINISH_LEAD_INSIGHTS_SQL = """
+    UPDATE leads
+    SET ai_status = %(status)s, ai_insights = %(insights)s, ai_model = %(model)s,
+        ai_error = %(error)s, ai_usage = %(usage)s, ai_updated_at = CURRENT_TIMESTAMP
+    WHERE id = %(id)s AND ai_status = 'pending'
+    RETURNING ai_status, ai_insights, ai_model, ai_error, ai_usage, ai_updated_at
+"""
+
+
+def get_lead_insights(lead_id: int) -> dict | None:
+    """Return the AI-relevant fields and stored insights state of one lead."""
+    with _get_pool().connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(_GET_LEAD_INSIGHTS_SQL, (lead_id,)).fetchone()
+    return dict(row) if row is not None else None
+
+
+def claim_lead_insights(lead_id: int, *, retry: bool, stale_seconds: float) -> bool:
+    """Atomically mark insights as pending; False when another state wins."""
+    params = {"id": lead_id, "retry": retry, "stale_seconds": stale_seconds}
+    with _get_pool().connection() as conn:
+        row = conn.execute(_CLAIM_LEAD_INSIGHTS_SQL, params).fetchone()
+    return row is not None
+
+
+def finish_lead_insights(
+    lead_id: int,
+    *,
+    status: str,
+    insights: dict | None,
+    model: str | None,
+    error: str | None,
+    usage: dict | None = None,
+) -> dict | None:
+    """Store the outcome of a claimed request; None if the claim was lost."""
+    params = {
+        "id": lead_id,
+        "status": status,
+        "insights": Jsonb(insights) if insights is not None else None,
+        "model": model,
+        "error": error,
+        "usage": Jsonb(usage) if usage is not None else None,
+    }
+    with _get_pool().connection() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            row = cur.execute(_FINISH_LEAD_INSIGHTS_SQL, params).fetchone()
+    return dict(row) if row is not None else None
 
 
 def delete_lead(lead_id: int) -> bool:
