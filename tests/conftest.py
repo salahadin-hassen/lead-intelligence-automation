@@ -40,7 +40,7 @@ def schema_ready(test_database_url: str) -> str:
     """Create a clean schema in the test database before the session runs."""
     try:
         with psycopg.connect(test_database_url, autocommit=True) as conn:
-            conn.execute("DROP TABLE IF EXISTS leads;")
+            conn.execute("DROP TABLE IF EXISTS leads, ai_insights_budget;")
             for path in sorted(SQL_DIR.glob("*.sql")):
                 conn.execute(path.read_text(encoding="utf-8"))
     except psycopg.Error as exc:
@@ -81,5 +81,5 @@ def client(schema_ready: str):
 def clean_leads(schema_ready: str):
     """Truncate the test table before every test."""
     with psycopg.connect(schema_ready, autocommit=True) as conn:
-        conn.execute("TRUNCATE TABLE leads RESTART IDENTITY;")
+        conn.execute("TRUNCATE TABLE leads, ai_insights_budget RESTART IDENTITY;")
     yield

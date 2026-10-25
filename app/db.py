@@ -246,6 +246,18 @@ _CLAIM_LEAD_INSIGHTS_SQL = """
     RETURNING id
 """
 
+# Counts one paid call in the current fixed hour/day window, but only while the
+# window is below its limit; no row returned means the limit is reached. The
+# conflict update row-locks the window, so concurrent reservations serialize.
+_RESERVE_BUDGET_SQL = """
+    INSERT INTO ai_insights_budget (window_kind, window_start, calls)
+    VALUES (%(kind)s, date_trunc(%(kind)s, CURRENT_TIMESTAMP), 1)
+    ON CONFLICT (window_kind, window_start)
+    DO UPDATE SET calls = ai_insights_budget.calls + 1
+    WHERE ai_insights_budget.calls < %(limit)s
+    RETURNING calls
+"""
+
 _FINISH_LEAD_INSIGHTS_SQL = """
     UPDATE leads
     SET ai_status = %(status)s, ai_insights = %(insights)s, ai_model = %(model)s,
@@ -263,12 +275,36 @@ def get_lead_insights(lead_id: int) -> dict | None:
     return dict(row) if row is not None else None
 
 
-def claim_lead_insights(lead_id: int, *, retry: bool, stale_seconds: float) -> bool:
-    """Atomically mark insights as pending; False when another state wins."""
+def reserve_lead_insights(
+    lead_id: int,
+    *,
+    retry: bool,
+    stale_seconds: float,
+    hourly_limit: int,
+    daily_limit: int,
+) -> str:
+    """Claim the lead AND one unit of the global call budget, atomically.
+
+    Returns "reserved" (the caller may make exactly one model call),
+    "not_claimable" (completed, in progress, or failed without retry; no
+    budget used) or "budget_exceeded" (nothing changed; the lead stays
+    claimable for later). Database errors propagate, so a broken budget check
+    can never lead to a model call.
+    """
     params = {"id": lead_id, "retry": retry, "stale_seconds": stale_seconds}
     with _get_pool().connection() as conn:
-        row = conn.execute(_CLAIM_LEAD_INSIGHTS_SQL, params).fetchone()
-    return row is not None
+        with conn.transaction():
+            if conn.execute(_CLAIM_LEAD_INSIGHTS_SQL, params).fetchone() is None:
+                return "not_claimable"
+            for kind, limit in (("hour", hourly_limit), ("day", daily_limit)):
+                reserved = limit > 0 and conn.execute(
+                    _RESERVE_BUDGET_SQL, {"kind": kind, "limit": limit}
+                ).fetchone() is not None
+                if not reserved:
+                    # Undo the claim and any window already counted.
+                    raise psycopg.Rollback()
+            return "reserved"
+    return "budget_exceeded"
 
 
 def finish_lead_insights(

@@ -44,9 +44,15 @@ Lead form (demo/lead-form.html) · curl · any other client
         ▼
   Route on API Status     (switch on statusCode: 201 · 409 · 422 · fallback)
         │
-        ├─ 201 ──┬─► Respond Created ─────────────────► caller gets the envelope
-        │        │     (executes FIRST — see Caller-response isolation)
-        │        └─► Extract Lead + Score   normalize LeadResponse (leadId,
+        ├─ 201 ──┬─► Demo Insights Requested? ─(no)─► Respond Created ──► caller gets the envelope
+        │        │     (executes FIRST — see Caller-response isolation;
+        │        │      (yes) = body.demo_insights === true → no answer yet)
+        │        └─► Generate AI Insights   POST {apiLeadsUrl}/{lead_id}/insights (one attempt)
+        │                  ▼
+        │           Attach AI Insights      lead-id check; create response passed through
+        │                  ├─► Return AI Insights? ─(demo)─► Respond Created with AI Insights
+        │                  ▼
+        │           Extract Lead + Score   normalize LeadResponse (leadId,
         │                  │                 company, source, score …)
         │                  ▼
         │           Qualification          score vs threshold → label
@@ -92,6 +98,8 @@ neither change nor delay the caller's answer — but only because
 (see Caller-response isolation); the branch does not depend on execution
 continuing past a `respondToWebhook` node.
 
+**AI lead insights** (see [`ai-lead-insights.md`](ai-lead-insights.md)) sit between the 201 branch and `Extract Lead + Score`. `Attach AI Insights` passes the `Create Lead in FastAPI` result through unchanged and only adds `aiInsights`, so every downstream node, the score, the qualification and every notification condition read exactly what they read before. Normal callers still get the unchanged `Respond Created` envelope before the AI call. Only a request with `"demo_insights": true` (sent by the `/demo` page) is answered after enrichment, by `Respond Created with AI Insights`, which is the same envelope plus `ai_insights`.
+
 | Node | Responsibility |
 |---|---|
 | `Lead Webhook` | Receives the POST; waits for a Respond node (`responseMode: responseNode`) so the caller always gets an answer from the branch that actually ran. |
@@ -99,6 +107,10 @@ continuing past a `respondToWebhook` node.
 | `Create Lead in FastAPI` | `POST {apiLeadsUrl}` with a JSON body. `fullResponse` so the status code survives, `neverError` so a 409/422 continues down the graph instead of failing the execution, `onError: continueRegularOutput` so an unreachable API still reaches the fallback branch, `timeout: 10000`, **no retries**. |
 | `Route on API Status` | Branches on the HTTP status FastAPI actually returned; anything else (500, 503, connection refused, timeout) goes to the fallback output. Only the 201 branch continues into qualification. |
 | `Respond *` | One Respond-to-Webhook node per outcome, each with its own response code and envelope. |
+| `Demo Insights Requested?` | Switch on `String(body.demo_insights === true)` from `Lead Webhook`. Fallback (any non-demo caller) → `Respond Created`; the `demo` output is intentionally unconnected so the demo answer waits for enrichment. Positioned above `Generate AI Insights` so normal callers are answered first. |
+| `Generate AI Insights` | `POST {apiLeadsUrl}/{lead_id}/insights` where `lead_id` is read from **this execution's** `Create Lead in FastAPI` response (`$('Create Lead in FastAPI').first().json.body.lead_id`). Same FastAPI Header Auth credential, `fullResponse` + `neverError`, `onError: continueRegularOutput`, `timeout: 30000`, **no retries** (FastAPI caches and claims per lead; n8n never adds a paid retry). It runs for every created lead whatever the caller sends; the cost ceiling is enforced by the API's global call budget, not by n8n or the `demo_insights` flag (see [`ai-lead-insights.md`](ai-lead-insights.md), Section 11). |
+| `Attach AI Insights` | Embeds `n8n/attach-ai-insights.js` verbatim. Accepts insights only when the response's `lead_id` equals the created `lead_id`; otherwise `status: "unavailable"`, `error: "lead_id_mismatch"`. Every failure (HTTP error, network error, unexpected shape, invalid fields) becomes an explicit non-`completed` status, never fabricated insights. Drops usage/cache metadata. Output = the create response plus `aiInsights`. |
+| `Return AI Insights?` / `Respond Created with AI Insights` | Demo only: the same `201` envelope as `Respond Created` plus `ai_insights`. Positioned above `Extract Lead + Score` so the demo answer precedes the notification chain. |
 | `Extract Lead + Score` | Reads the 201 body of `Create Lead in FastAPI` and normalizes it into the routing base result (`leadId`, `name`, `email`, `company`, `source`, `score`, `scoreReason`). The score is copied, not interpreted: anything FastAPI did not return as a finite number stays `null` (never `0`, never a guess). |
 | `Qualification` | **The one place the threshold rule is applied** (see Qualification rule). Labels the lead `qualified` / `not_qualified` / `manual_review` and attaches `priority` (`high` / `normal` / `null`). Reads the threshold from `Prepare Lead Payload` — it does not define or repeat it. |
 | `Route on Qualification` | Switch (string equality on `qualification`) with a defensive fallback output; the fallback — a state the decision node should never emit — is wired to `Log Manual Review`, so an unknown state goes to a human instead of being dropped. |
@@ -428,6 +440,8 @@ below was **measured, not assumed**:
   (`status: error`) with the error message persisted in the execution data** —
   visible, not swallowed — while the caller keeps the genuine `201`. No
   operational node sets `onError: continue*`, so failures are never muted.
+
+- AI insights keep this guarantee. For normal callers `Demo Insights Requested?` (`[960,-720]`) sits above `Generate AI Insights` (`[960,-600]`), so `Respond Created` runs before the AI call. For demo callers `Return AI Insights?` (`[1440,-640]`) sits above `Extract Lead + Score` (`[960,-480]`), so the demo answer precedes qualification and notifications. Measured with n8n 2.41.7 in a local sandbox: normal execution `Respond Created → Generate AI Insights → Attach AI Insights → Extract Lead + Score`; demo execution `Generate AI Insights → Attach AI Insights → Respond Created with AI Insights → Extract Lead + Score`.
 
 Fault-injection evidence (Verification, cases 10–12): with the old position a
 throwing `Extract Lead + Score` made the caller receive

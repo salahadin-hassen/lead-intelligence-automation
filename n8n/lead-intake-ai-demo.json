@@ -224,7 +224,7 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "method": "POST",
-        "url": "={{ $('Prepare Lead Payload').item.json.apiLeadsUrl + '/' + $json.body.lead_id + '/insights' }}",
+        "url": "={{ $('Prepare Lead Payload').first().json.apiLeadsUrl + '/' + $('Create Lead in FastAPI').first().json.body.lead_id + '/insights' }}",
         "options": {
           "response": {
             "response": {
@@ -255,7 +255,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ outcome: 'created', apiStatus: 201, lead: $('Create Lead in FastAPI').item.json.body, score: $('Create Lead in FastAPI').item.json.body.score, score_reason: $('Create Lead in FastAPI').item.json.body.score_reason, ai_insights: ($json.statusCode === 200 && $json.body && typeof $json.body === 'object') ? $json.body : { status: 'unavailable', error: $json.statusCode ? 'insights_http_' + $json.statusCode : 'insights_request_failed' } }) }}",
+        "responseBody": "={{ JSON.stringify({ outcome: 'created', apiStatus: $json.statusCode, lead: $json.body, score: ($json.body && $json.body.score), score_reason: ($json.body && $json.body.score_reason), ai_insights: $json.aiInsights }) }}",
         "options": {
           "responseCode": 201
         }
@@ -264,6 +264,20 @@
       "name": "Respond Created with AI Insights",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
+      "position": [
+        1440,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Attach AI insights for the lead THIS execution created (fail-open).\n// attachAiInsights is a verbatim copy of n8n/attach-ai-insights.js; the test\n// suite fails if the two drift apart. The lead id is taken from this\n// execution's \"Create Lead in FastAPI\" response, never from another node.\nfunction attachAiInsights(created, insightsHttp) {\n  created = created && typeof created === \"object\" ? created : {};\n  insightsHttp = insightsHttp && typeof insightsHttp === \"object\" ? insightsHttp : {};\n  const createdBody = created.body && typeof created.body === \"object\" ? created.body : {};\n  const leadId = Number.isInteger(createdBody.lead_id) ? createdBody.lead_id : null;\n\n  const FIELDS = [\"summary\", \"intent_category\", \"urgency\", \"recommended_next_action\", \"reason\"];\n  const CATEGORIES = [\"quote_request\", \"consultation\", \"support\", \"partnership\", \"other\"];\n  const URGENCIES = [\"low\", \"medium\", \"high\"];\n  const NON_COMPLETED = [\"disabled\", \"failed\", \"pending\"];\n\n  const unavailable = (error) => ({ status: \"unavailable\", lead_id: leadId, insights: null, error });\n\n  let aiInsights;\n  const body = insightsHttp.body && typeof insightsHttp.body === \"object\" ? insightsHttp.body : null;\n  if (leadId === null) {\n    aiInsights = unavailable(\"missing_created_lead_id\");\n  } else if (typeof insightsHttp.statusCode !== \"number\") {\n    // n8n HTTP node error output (timeout, DNS, connection refused, ...)\n    aiInsights = unavailable(\"insights_request_failed\");\n  } else if (insightsHttp.statusCode !== 200 || !body) {\n    aiInsights = unavailable(\"insights_http_\" + insightsHttp.statusCode);\n  } else if (body.lead_id !== leadId) {\n    aiInsights = unavailable(\"lead_id_mismatch\");\n  } else if (body.status === \"completed\") {\n    const raw = body.insights && typeof body.insights === \"object\" ? body.insights : {};\n    const valid =\n      FIELDS.every((f) => typeof raw[f] === \"string\" && raw[f].trim() !== \"\") &&\n      CATEGORIES.includes(raw.intent_category) &&\n      URGENCIES.includes(raw.urgency);\n    if (valid) {\n      const insights = {};\n      FIELDS.forEach((f) => { insights[f] = raw[f]; });\n      aiInsights = {\n        status: \"completed\",\n        lead_id: leadId,\n        insights,\n        model: typeof body.model === \"string\" ? body.model : null,\n        error: null,\n      };\n    } else {\n      aiInsights = unavailable(\"invalid_insights\");\n    }\n  } else if (NON_COMPLETED.includes(body.status)) {\n    aiInsights = {\n      status: body.status,\n      lead_id: leadId,\n      insights: null,\n      error: typeof body.error === \"string\" ? body.error : null,\n    };\n  } else {\n    aiInsights = unavailable(\"unexpected_insights_status\");\n  }\n\n  // Keep the create-lead response shape ({statusCode, body, ...}) intact so\n  // the existing downstream nodes read exactly what they read before.\n  return Object.assign({}, created, { aiInsights });\n}\n\nconst created = $('Create Lead in FastAPI').first().json;\nreturn [{ json: attachAiInsights(created, $input.first().json) }];"
+      },
+      "id": "7a2e3b20-0000-4000-8000-000000000010",
+      "name": "Attach AI Insights",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         1200,
         -240
@@ -337,6 +351,17 @@
       ]
     },
     "Generate AI Insights": {
+      "main": [
+        [
+          {
+            "node": "Attach AI Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach AI Insights": {
       "main": [
         [
           {

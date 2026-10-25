@@ -1196,6 +1196,93 @@
     color: var(--text-muted);
   }
 
+  /* AI lead insights (demo view only; generated suggestions, never the score) */
+  .ai-insights-card {
+    background: var(--bg-surface-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .ai-insights-card[hidden],
+  .ai-insights-fields[hidden] {
+    display: none;
+  }
+
+  .ai-insights-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .ai-insights-title {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-muted);
+  }
+
+  .ai-insights-badge {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 18px;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    background: var(--bg-surface-1);
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .ai-insights-badge.completed { background: var(--accent-green-bg); color: var(--accent-green); }
+  .ai-insights-badge.unavailable { background: var(--accent-orange-bg); color: var(--accent-orange); }
+
+  .ai-insights-note {
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--text-muted);
+    margin: 0 0 8px;
+  }
+
+  .ai-insights-fields {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .ai-insights-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .ai-insights-label {
+    display: block;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    margin-bottom: 2px;
+  }
+
+  .ai-insights-value {
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+  }
+
+  .ai-insights-disclaimer {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text-dim);
+    margin: 0;
+  }
+
+  @media (max-width: 480px) {
+    .ai-insights-pair { grid-template-columns: 1fr; }
+  }
+
   .outcome-actions {
     display: flex;
     gap: 12px;
@@ -2146,6 +2233,40 @@
               </p>
             </div>
 
+            <!-- AI Lead Insights: generated suggestions returned for THIS lead only -->
+            <div class="ai-insights-card" id="ai-insights-card" aria-label="AI lead insights" hidden>
+              <div class="ai-insights-header">
+                <span class="ai-insights-title">AI lead insights</span>
+                <span class="ai-insights-badge" id="ai-insights-badge">—</span>
+              </div>
+              <p class="ai-insights-note" id="ai-insights-note"></p>
+              <div class="ai-insights-fields" id="ai-insights-fields" hidden>
+                <div>
+                  <span class="ai-insights-label">Summary</span>
+                  <span class="ai-insights-value" id="ai-insights-summary"></span>
+                </div>
+                <div class="ai-insights-pair">
+                  <div>
+                    <span class="ai-insights-label">Intent</span>
+                    <span class="ai-insights-value" id="ai-insights-intent"></span>
+                  </div>
+                  <div>
+                    <span class="ai-insights-label">Urgency</span>
+                    <span class="ai-insights-value" id="ai-insights-urgency"></span>
+                  </div>
+                </div>
+                <div>
+                  <span class="ai-insights-label">Recommended next action</span>
+                  <span class="ai-insights-value" id="ai-insights-action"></span>
+                </div>
+                <div>
+                  <span class="ai-insights-label">Why</span>
+                  <span class="ai-insights-value" id="ai-insights-reason"></span>
+                </div>
+              </div>
+              <p class="ai-insights-disclaimer">AI-generated suggestions for a sales rep to review, not a decision. The qualification score above is calculated separately and is never changed by AI.</p>
+            </div>
+
             <!-- Outcome Actions -->
             <div class="outcome-actions">
               <button type="button" id="outcome-test-dup-btn" class="btn-secondary">
@@ -2991,6 +3112,88 @@ function resetRailHighlights() {
   form.style.display = "block";
 }
 
+/* AI_INSIGHTS_VIEW_START — pure view logic + text-only rendering (tested in tests/test_ai_intake_integration.py) */
+const AI_INTENT_LABELS = {
+  quote_request: "Quote request",
+  consultation: "Consultation",
+  support: "Support",
+  partnership: "Partnership",
+  other: "Other",
+};
+const AI_URGENCY_LABELS = { low: "Low", medium: "Medium", high: "High" };
+const AI_FAILURE_NOTES = {
+  timeout: "The AI service timed out.",
+  insufficient_quota: "The AI credit balance is exhausted.",
+  rate_limited: "The AI service is rate-limiting requests.",
+  auth_error: "The AI service rejected the server credentials.",
+  budget_exceeded: "The public demo's AI allowance is used up for now. Please try again later.",
+  lead_id_mismatch: "The AI response did not belong to this lead, so it was withheld.",
+};
+const AI_SAVED_NOTE = " The lead was still saved and scored.";
+
+function describeAiInsights(data) {
+  const lead = (data && data.lead) || {};
+  const ai = data && data.ai_insights;
+  if (!ai || typeof ai !== "object") {
+    return { state: "not_returned", badge: "Not returned", note: "This intake response did not include AI insights." + AI_SAVED_NOTE };
+  }
+  if (!Number.isInteger(lead.lead_id) || ai.lead_id !== lead.lead_id) {
+    return { state: "unavailable", badge: "Unavailable", note: AI_FAILURE_NOTES.lead_id_mismatch + AI_SAVED_NOTE };
+  }
+  const insights = ai.insights || {};
+  const isText = function(v) { return typeof v === "string" && v.trim() !== ""; };
+  if (
+    ai.status === "completed" &&
+    isText(insights.summary) && isText(insights.recommended_next_action) && isText(insights.reason) &&
+    Object.prototype.hasOwnProperty.call(AI_INTENT_LABELS, insights.intent_category) &&
+    Object.prototype.hasOwnProperty.call(AI_URGENCY_LABELS, insights.urgency)
+  ) {
+    return {
+      state: "completed",
+      badge: "Generated",
+      note: "Generated for lead #" + lead.lead_id + (isText(ai.model) ? " by " + ai.model : "") + ".",
+      fields: {
+        summary: insights.summary,
+        intent: AI_INTENT_LABELS[insights.intent_category],
+        urgency: AI_URGENCY_LABELS[insights.urgency],
+        action: insights.recommended_next_action,
+        reason: insights.reason,
+      },
+    };
+  }
+  if (ai.status === "disabled") {
+    return { state: "unavailable", badge: "Disabled", note: "AI insights are turned off on the server." + AI_SAVED_NOTE };
+  }
+  if (ai.status === "pending") {
+    return { state: "unavailable", badge: "Pending", note: "AI insights are still being generated for this lead." + AI_SAVED_NOTE };
+  }
+  const reason = AI_FAILURE_NOTES[ai.error] || "AI insights could not be generated for this submission.";
+  return { state: "unavailable", badge: ai.status === "failed" ? "Failed" : "Unavailable", note: reason + AI_SAVED_NOTE };
+}
+
+function renderAiInsights(view) {
+  const card = document.getElementById("ai-insights-card");
+  if (!card) return;
+  if (!view) {
+    card.hidden = true;
+    return;
+  }
+  const badge = document.getElementById("ai-insights-badge");
+  const fieldsBox = document.getElementById("ai-insights-fields");
+  badge.textContent = view.badge;
+  badge.className = "ai-insights-badge " + (view.state === "completed" ? "completed" : "unavailable");
+  document.getElementById("ai-insights-note").textContent = view.note;
+  const fields = view.fields || {};
+  document.getElementById("ai-insights-summary").textContent = fields.summary || "";
+  document.getElementById("ai-insights-intent").textContent = fields.intent || "";
+  document.getElementById("ai-insights-urgency").textContent = fields.urgency || "";
+  document.getElementById("ai-insights-action").textContent = fields.action || "";
+  document.getElementById("ai-insights-reason").textContent = fields.reason || "";
+  fieldsBox.hidden = view.state !== "completed";
+  card.hidden = false;
+}
+/* AI_INSIGHTS_VIEW_END */
+
 function highlightOutcome(outcome, data, latencyMs) {
   if (latencyBadge && latencyMs !== undefined) {
     latencyText.textContent = `Response time: ${latencyMs}ms`;
@@ -3049,8 +3252,10 @@ function highlightOutcome(outcome, data, latencyMs) {
     }
 
     statusBlockDesc.textContent = "FastAPI accepted and stored the lead record. n8n continues qualification and any configured notifications asynchronously.";
+    renderAiInsights(describeAiInsights(data));
     updateTelemetryPreview(data, "API response · 201 Created");
   } else if (outcome === "duplicate") {
+    renderAiInsights(null);
     outcomeIcon.className = "outcome-status-icon duplicate";
     outcomeIcon.textContent = "!";
     outcomeTitle.textContent = "Duplicate Ingestion Blocked (409)";
@@ -3071,6 +3276,7 @@ function highlightOutcome(outcome, data, latencyMs) {
 
     updateTelemetryPreview(data, "API response · 409 Conflict");
   } else {
+    renderAiInsights(null);
     outcomeIcon.className = "outcome-status-icon";
     outcomeIcon.style.background = "var(--accent-red-bg)";
     outcomeIcon.style.color = "var(--accent-red)";
@@ -3096,7 +3302,7 @@ function setSubmitting(submitting) {
   submitBtn.disabled = submitting;
   form.setAttribute("aria-busy", String(submitting));
   submitBtn.classList.toggle("submitting", submitting);
-  submitLabel.textContent = submitting ? "Sending to intake…" : "Send demo enquiry →";
+  submitLabel.textContent = submitting ? "Sending to intake… (AI insights take a few seconds)" : "Send demo enquiry →";
 }
 
 async function handleSubmit(event) {
@@ -3116,6 +3322,10 @@ async function handleSubmit(event) {
     message: document.getElementById("message").value.trim(),
     source: CONFIG.source,
     external_id: extId,
+    // Demo-only opt-in: the intake workflow then answers after AI enrichment
+    // and includes ai_insights for this lead. Other callers get the original
+    // response without insights.
+    demo_insights: true,
   };
 
   lastSubmittedPayload = Object.assign({}, payload);
@@ -3172,6 +3382,7 @@ form.addEventListener("submit", handleSubmit);
 
 outcomeResetBtn.addEventListener("click", function() {
   currentExternalId = null;
+  renderAiInsights(null);
   resetRailHighlights();
   form.reset();
   if (charCounter) charCounter.textContent = "0 / 500";

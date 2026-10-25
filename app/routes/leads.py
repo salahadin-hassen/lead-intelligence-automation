@@ -261,8 +261,21 @@ def create_lead_insights(
             error=None if not settings.ai_insights_enabled else "not_configured",
         )
 
-    stale_seconds = settings.ai_insights_timeout_seconds + 60
-    if not db.claim_lead_insights(lead_id, retry=retry, stale_seconds=stale_seconds):
+    # The claim and one unit of the global hourly/daily call budget are taken
+    # in one transaction: this is the only way to reach the paid model call,
+    # whatever path (website, direct webhook, demo flag) created the lead.
+    reservation = db.reserve_lead_insights(
+        lead_id,
+        retry=retry,
+        stale_seconds=settings.ai_insights_timeout_seconds + 60,
+        hourly_limit=settings.ai_insights_max_calls_per_hour,
+        daily_limit=settings.ai_insights_max_calls_per_day,
+    )
+    if reservation == "budget_exceeded":
+        # Not persisted: no call was made and the lead stays claimable.
+        logger.warning("AI insights call budget reached; lead %s not enriched", lead_id)
+        return LeadInsightsResponse(lead_id=lead_id, status="failed", error="budget_exceeded")
+    if reservation != "reserved":
         return _insights_response(lead_id, db.get_lead_insights(lead_id) or row, cached=True)
 
     try:

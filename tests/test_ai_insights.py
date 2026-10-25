@@ -538,7 +538,7 @@ def _eval_n8n_expression(expression: str, json_input: dict, named: dict) -> obje
     script = """
     const [expr, input, named] = [process.argv[1], JSON.parse(process.argv[2]), JSON.parse(process.argv[3])];
     const body = expr.replace(/^=\\{\\{/, "").replace(/\\}\\}$/, "");
-    const $ = (name) => ({ item: { json: named[name] } });
+    const $ = (name) => ({ item: { json: named[name] }, first: () => ({ json: named[name] }) });
     console.log(JSON.stringify(new Function("$json", "$", `return (${body});`)(input, $)));
     """
     res = __import__("subprocess").run(
@@ -548,26 +548,27 @@ def _eval_n8n_expression(expression: str, json_input: dict, named: dict) -> obje
     return json.loads(res.stdout)
 
 
-def test_ai_demo_expressions_return_insights_or_explicit_unavailable():
+def test_ai_demo_expressions_use_the_created_lead_and_attached_insights():
     nodes = _demo_nodes()
-    created = {"statusCode": 201, "body": {"lead_id": 21, "score": 48, "score_reason": "very short message"}}
+    created = {"statusCode": 201, "body": {"lead_id": 23, "score": 48, "score_reason": "very short message"}}
     named = {
         "Prepare Lead Payload": {"apiLeadsUrl": "https://api.example.test/leads"},
         "Create Lead in FastAPI": created,
     }
+    # $json deliberately carries a different (stale) lead: the URL must ignore it.
+    stale = {"statusCode": 201, "body": {"lead_id": 21}}
 
-    url = _eval_n8n_expression(nodes["Generate AI Insights"]["parameters"]["url"], created, named)
-    assert url == "https://api.example.test/leads/21/insights"
+    url = _eval_n8n_expression(nodes["Generate AI Insights"]["parameters"]["url"], stale, named)
+    assert url == "https://api.example.test/leads/23/insights"
+    assert [e["node"] for e in json.loads(DEMO_PATH.read_text())["connections"]["Generate AI Insights"]["main"][0]] == [
+        "Attach AI Insights"
+    ]
 
     respond = nodes["Respond Created with AI Insights"]["parameters"]["responseBody"]
-    ok = json.loads(_eval_n8n_expression(respond, {"statusCode": 200, "body": {"status": "completed", "insights": VALID_INSIGHTS}}, named))
-    assert ok["lead"]["lead_id"] == 21 and ok["score"] == 48
-    assert ok["ai_insights"]["insights"] == VALID_INSIGHTS
-
-    for failure, code in (({"statusCode": 503, "body": {}}, "insights_http_503"), ({"error": "ETIMEDOUT"}, "insights_request_failed")):
-        out = json.loads(_eval_n8n_expression(respond, failure, named))
-        assert out["outcome"] == "created" and out["score"] == 48
-        assert out["ai_insights"] == {"status": "unavailable", "error": code}
+    attached = {**created, "aiInsights": {"status": "completed", "lead_id": 23, "insights": VALID_INSIGHTS}}
+    out = json.loads(_eval_n8n_expression(respond, attached, named))
+    assert out["outcome"] == "created" and out["lead"]["lead_id"] == 23 and out["score"] == 48
+    assert out["ai_insights"]["lead_id"] == 23 and out["ai_insights"]["insights"] == VALID_INSIGHTS
 
 
 def test_migration_is_additive_and_constrains_status(schema_ready):

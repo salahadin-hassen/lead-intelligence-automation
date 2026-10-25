@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     ai_insights_timeout_seconds: float = 15.0
     ai_insights_max_output_tokens: int = 300
     ai_insights_max_input_chars: int = 2000
+    # Global ceiling on paid insights calls (all callers together; the public
+    # webhook gives no trustworthy per-client identity). 0 disables calls.
+    ai_insights_max_calls_per_hour: int = 20
+    ai_insights_max_calls_per_day: int = 100
     app_env: str = "development"
     render: bool = False
     api_auth_token: str | None = None

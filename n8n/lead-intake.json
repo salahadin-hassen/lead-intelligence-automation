@@ -181,7 +181,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        960,
+        1200,
         -720
       ]
     },
@@ -623,6 +623,152 @@
         2400,
         -100
       ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-0101-demo",
+                    "leftValue": "={{ String(($('Lead Webhook').first().json.body || {}).demo_insights === true) }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "demo"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000101",
+      "name": "Demo Insights Requested?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "POST",
+        "url": "={{ $('Prepare Lead Payload').first().json.apiLeadsUrl + '/' + $('Create Lead in FastAPI').first().json.body.lead_id + '/insights' }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000102",
+      "name": "Generate AI Insights",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        960,
+        -600
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fastapi-bearer-auth",
+          "name": "FastAPI Bearer Auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Attach AI insights for the lead THIS execution created (fail-open).\n// attachAiInsights is a verbatim copy of n8n/attach-ai-insights.js; the test\n// suite fails if the two drift apart. The lead id is taken from this\n// execution's \"Create Lead in FastAPI\" response, never from another node.\nfunction attachAiInsights(created, insightsHttp) {\n  created = created && typeof created === \"object\" ? created : {};\n  insightsHttp = insightsHttp && typeof insightsHttp === \"object\" ? insightsHttp : {};\n  const createdBody = created.body && typeof created.body === \"object\" ? created.body : {};\n  const leadId = Number.isInteger(createdBody.lead_id) ? createdBody.lead_id : null;\n\n  const FIELDS = [\"summary\", \"intent_category\", \"urgency\", \"recommended_next_action\", \"reason\"];\n  const CATEGORIES = [\"quote_request\", \"consultation\", \"support\", \"partnership\", \"other\"];\n  const URGENCIES = [\"low\", \"medium\", \"high\"];\n  const NON_COMPLETED = [\"disabled\", \"failed\", \"pending\"];\n\n  const unavailable = (error) => ({ status: \"unavailable\", lead_id: leadId, insights: null, error });\n\n  let aiInsights;\n  const body = insightsHttp.body && typeof insightsHttp.body === \"object\" ? insightsHttp.body : null;\n  if (leadId === null) {\n    aiInsights = unavailable(\"missing_created_lead_id\");\n  } else if (typeof insightsHttp.statusCode !== \"number\") {\n    // n8n HTTP node error output (timeout, DNS, connection refused, ...)\n    aiInsights = unavailable(\"insights_request_failed\");\n  } else if (insightsHttp.statusCode !== 200 || !body) {\n    aiInsights = unavailable(\"insights_http_\" + insightsHttp.statusCode);\n  } else if (body.lead_id !== leadId) {\n    aiInsights = unavailable(\"lead_id_mismatch\");\n  } else if (body.status === \"completed\") {\n    const raw = body.insights && typeof body.insights === \"object\" ? body.insights : {};\n    const valid =\n      FIELDS.every((f) => typeof raw[f] === \"string\" && raw[f].trim() !== \"\") &&\n      CATEGORIES.includes(raw.intent_category) &&\n      URGENCIES.includes(raw.urgency);\n    if (valid) {\n      const insights = {};\n      FIELDS.forEach((f) => { insights[f] = raw[f]; });\n      aiInsights = {\n        status: \"completed\",\n        lead_id: leadId,\n        insights,\n        model: typeof body.model === \"string\" ? body.model : null,\n        error: null,\n      };\n    } else {\n      aiInsights = unavailable(\"invalid_insights\");\n    }\n  } else if (NON_COMPLETED.includes(body.status)) {\n    aiInsights = {\n      status: body.status,\n      lead_id: leadId,\n      insights: null,\n      error: typeof body.error === \"string\" ? body.error : null,\n    };\n  } else {\n    aiInsights = unavailable(\"unexpected_insights_status\");\n  }\n\n  // Keep the create-lead response shape ({statusCode, body, ...}) intact so\n  // the existing downstream nodes read exactly what they read before.\n  return Object.assign({}, created, { aiInsights });\n}\n\nconst created = $('Create Lead in FastAPI').first().json;\nreturn [{ json: attachAiInsights(created, $input.first().json) }];"
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000103",
+      "name": "Attach AI Insights",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -600
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-0104-demo",
+                    "leftValue": "={{ String(($('Lead Webhook').first().json.body || {}).demo_insights === true) }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "demo"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000104",
+      "name": "Return AI Insights?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1440,
+        -640
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ outcome: 'created', apiStatus: $json.statusCode, lead: $json.body, score: ($json.body && $json.body.score), score_reason: ($json.body && $json.body.score_reason), ai_insights: $json.aiInsights }) }}",
+        "options": {
+          "responseCode": 201
+        }
+      },
+      "id": "5f1d2a10-0000-4000-8000-000000000105",
+      "name": "Respond Created with AI Insights",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1680,
+        -640
+      ]
     }
   ],
   "connections": {
@@ -663,12 +809,12 @@
       "main": [
         [
           {
-            "node": "Respond Created",
+            "node": "Demo Insights Requested?",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Extract Lead + Score",
+            "node": "Generate AI Insights",
             "type": "main",
             "index": 0
           }
@@ -877,6 +1023,56 @@
         [
           {
             "node": "Log WhatsApp Manual Review Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Demo Insights Requested?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Respond Created",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Insights": {
+      "main": [
+        [
+          {
+            "node": "Attach AI Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach AI Insights": {
+      "main": [
+        [
+          {
+            "node": "Return AI Insights?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extract Lead + Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return AI Insights?": {
+      "main": [
+        [
+          {
+            "node": "Respond Created with AI Insights",
             "type": "main",
             "index": 0
           }
