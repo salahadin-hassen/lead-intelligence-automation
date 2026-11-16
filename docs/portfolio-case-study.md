@@ -110,7 +110,7 @@ The system is deployed on public cloud infrastructure and was verified on releas
 
 ### Verified Test Results:
 
-- **Deployment Environment:** Public web services hosted on Render (`leadintel-caddy.onrender.com`, `leadintel-api-2y0i.onrender.com`, `leadintel-n8n.onrender.com`) connected to a serverless Neon PostgreSQL cluster.
+- **Deployment Environment:** Served at `leadintel.sahelyon.com` through a Cloudflare Worker proxy; the public web services are hosted on Render (`leadintel-caddy.onrender.com`, `leadintel-api-2y0i.onrender.com`, `leadintel-n8n.onrender.com`) connected to a serverless Neon PostgreSQL cluster.
 - **Form Submission Verification:** A synthetic test inquiry was submitted through the public website form to verify the live pipeline.
 - **Observed Sample Latency:** In a verified live test run on warm instances, the complete round-trip—including edge routing, schema validation, database commit, scoring, and response generation—completed in **4,537 ms**. *(Note: This timing represents an individual observation on free-tier hosting; it is not a performance SLA or guaranteed speed).*
 - **Scoring Output:** The system scored the synthetic lead (43/100) and returned a descriptive explanation: *"free-mail email domain; strong source (contact form)"*.

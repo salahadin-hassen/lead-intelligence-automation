@@ -8,14 +8,14 @@
 
 - **Target Duration:** 3 to 5 minutes.
 - **Audience:** Business owners, Heads of Sales/RevOps, Technical Product Managers, or Freelance Clients.
-- **Public Demo URL:** `https://leadintel-caddy.onrender.com`
+- **Public Demo URL:** `https://leadintel.sahelyon.com`
 - **Environment:** Live production deployment on Render with serverless Neon PostgreSQL.
 
 ### 5-Minute Pre-Call Warm-Up (Cold-Start Mitigation)
 
 Render's free tier spins down web services after 15 minutes of inactivity. To reduce the likelihood of encountering a container cold start during your client demonstration:
 
-1. **5 minutes before the meeting:** Open `https://leadintel-caddy.onrender.com/` in an Incognito/Private browser tab.
+1. **5 minutes before the meeting:** Open `https://leadintel.sahelyon.com/` in an Incognito/Private browser tab.
 2. **Click "Try Demo":** Navigate to the `/demo` page.
 3. **Submit a warm-up inquiry:** Use the "Enterprise Demo" preset to wake up the Caddy proxy, n8n orchestrator, and FastAPI container.
 4. **Observe confirmation:** Once the confirmation appears, the containers are active. While free-tier platform behavior can still introduce occasional delays, this step substantially reduces the chance of a sleep delay during your live call.
@@ -35,10 +35,10 @@ Render's free tier spins down web services after 15 minutes of inactivity. To re
 
 **Goal:** Establish the business problem and show a polished, professional user interface.
 
-- **Action:** Share your screen with `https://leadintel-caddy.onrender.com/` open.
+- **Action:** Share your screen with `https://leadintel.sahelyon.com/` open.
 - **What to Observe:** The landing page opens cleanly at the top of the viewport (`scrollY: 0`). The interactive demo form is cleanly separated from the marketing copy.
 - **Action:** Click the top-nav **"Try Demo"** or hero CTA button.
-- **Expected Result:** The browser transitions smoothly to the dedicated route `https://leadintel-caddy.onrender.com/demo` at `scrollY: 0`, focusing user attention directly on the interactive lead intake card.
+- **Expected Result:** The browser transitions smoothly to the dedicated route `https://leadintel.sahelyon.com/demo` at `scrollY: 0`, focusing user attention directly on the interactive lead intake card.
 - **Presenter Script:**
   > *"When a prospective client lands on your website, speed and clarity matter. But most inbound lead forms are either disconnected from backend automation or dump data into a shared spreadsheet.*
   >
@@ -145,4 +145,4 @@ To maintain professional security standards during live client calls and recordi
 
 - **Use Only Synthetic Data:** Always use realistic synthetic company names (`Acme Corp`, `NovaLogistics`, `Vertex Solutions`) and demo email addresses (`alex@example.com`).
 - **Never Reveal Infrastructure Secrets:** Do not open `.env` files, database connection strings, n8n internal credentials, or Telegram API bot tokens during screen shares.
-- **Stick to the Public Web Experience:** Conduct the walkthrough entirely through the browser at `https://leadintel-caddy.onrender.com`. Showing the polished, working web portal builds vastly more client confidence than clicking through terminal logs or backend database tables.
+- **Stick to the Public Web Experience:** Conduct the walkthrough entirely through the browser at `https://leadintel.sahelyon.com`. Showing the polished, working web portal builds vastly more client confidence than clicking through terminal logs or backend database tables.

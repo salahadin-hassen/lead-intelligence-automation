@@ -2,8 +2,8 @@
 
 > An automated inbound lead qualification and routing system built with FastAPI, PostgreSQL, n8n, configurable LLM scoring, and dual Telegram/WhatsApp operator alerts.
 
-**Live Production Deployment:** [https://leadintel-caddy.onrender.com](https://leadintel-caddy.onrender.com)  
-**Interactive Lead Demo:** [https://leadintel-caddy.onrender.com/demo](https://leadintel-caddy.onrender.com/demo)  
+**Live Production Deployment:** [https://leadintel.sahelyon.com](https://leadintel.sahelyon.com)  
+**Interactive Lead Demo:** [https://leadintel.sahelyon.com/demo](https://leadintel.sahelyon.com/demo)  
 **Production Release Status:** Verified on commit [`2fc400f`](https://github.com/salahadin-hassen/lead-intelligence-automation/commit/2fc400f) (All 14 deployment gates passed)
 
 ---
@@ -13,7 +13,7 @@
 | Question | Detail |
 | :--- | :--- |
 | **What does it do?** | Ingests B2B contact inquiries, rejects duplicate submissions at the database level, scores buying intent ($0\text{--}100$) using hybrid AI, and alerts sales teams in real time. |
-| **Live Product Demo** | Hosted live at [`https://leadintel-caddy.onrender.com`](https://leadintel-caddy.onrender.com). Dedicated `/demo` route with instant form validation and duplicate replay testing. |
+| **Live Product Demo** | Hosted live at [`https://leadintel.sahelyon.com`](https://leadintel.sahelyon.com). Dedicated `/demo` route with instant form validation and duplicate replay testing. |
 | **Production Architecture** | Caddy 2.8 Edge Ingress $\rightarrow$ n8n 2.41 Webhook $\rightarrow$ Authenticated FastAPI (Python 3.12) $\rightarrow$ Neon Serverless PostgreSQL 16. |
 | **Verified Guarantees** | Zero duplicate leads (database unique constraints), multi-tier AI intent scoring with deterministic heuristic fallback, caller-response isolation, and **104 automated tests** (0 skips, 0 xfails). |
 | **What is Implemented?** | Production-ready website lead intake and pilot Gmail lead intake (`LeadIntel_Leads` label boundary), database deduplication, intent scoring, Telegram sales alerts, and WhatsApp Cloud API templates. *(CRM sync and multi-tenant OAuth platform are planned for future phases).* |
@@ -143,7 +143,7 @@ To maintain engineering credibility with clients and technical recruiters, the r
 ## Known Scope & Operational Boundaries
 
 - **Qualification Threshold:** The qualification threshold ($70$) is an initial operational business rule based on observed heuristic score clustering; it is not a statistically validated machine learning conversion model.
-- **Production Deployment:** Live in production on Render free tier (`leadintel-caddy.onrender.com`, `leadintel-api-2y0i.onrender.com`, `leadintel-n8n.onrender.com`) and Neon Serverless PostgreSQL. Instances sleep after 15 minutes of inactivity; initial cold starts take ~40–50s, while warm requests execute in ~4–5s.
+- **Production Deployment:** Live in production at `leadintel.sahelyon.com`, a Cloudflare Worker that proxies to the Render free-tier services (`leadintel-caddy.onrender.com`, `leadintel-api-2y0i.onrender.com`, `leadintel-n8n.onrender.com`) backed by Neon Serverless PostgreSQL. The Worker also pings the Caddy ingress every 10 minutes from 06:00 to 24:00 EAT to keep it warm; outside that window instances sleep after 15 minutes of inactivity, initial cold starts take ~40–50s, and warm requests execute in ~4–5s.
 - **Live WhatsApp Delivery:** Workflow routing, template definitions, and isolated error boundaries are fully implemented in `n8n/lead-intake.json`. Live message delivery requires an active Meta Developer account, verified sender/recipient phone numbers, and approved message templates (see [`docs/whatsapp-setup.md`](docs/whatsapp-setup.md)).
 - **Access Control Scope:** Ingress protection via Caddy; FastAPI implements fail-closed Bearer token authentication (`API_AUTH_TOKEN`) in production (`APP_ENV=production`).
 - **Free LLM Provider Constraints:** OpenRouter free router availability depends on third-party daily quotas (50 requests/day). If exhausted or unavailable, the deterministic heuristic scorer takes over automatically.
