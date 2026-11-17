@@ -502,8 +502,8 @@ def _run_page_in_browser(tmp_path: Path, scenario: dict) -> dict:
         pytest.skip("Chrome/Chromium is not installed")
     page = _page()
     stub = _BROWSER_STUB.replace("__SCENARIO__", json.dumps(scenario))
-    assert page.count('<script src="/config.js"></script>') == 1
-    page = page.replace('<script src="/config.js"></script>', stub, 1)
+    assert page.count('<script src="/config.js?v=2"></script>') == 1
+    page = page.replace('<script src="/config.js?v=2"></script>', stub, 1)
     api_url = '"https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"'
     assert page.count(api_url) == 1
     page = page.replace(api_url, '"data:text/javascript,"', 1)

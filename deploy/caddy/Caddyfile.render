@@ -48,6 +48,12 @@
 
 	# Serve static LeadIntel V2 frontend
 	handle {
+		# Everything served here is an HTML entry point (index.html, lead-form.html,
+		# and the /demo-style routes that fall back to index.html) or the
+		# runtime-generated config.js. "no-cache" lets browsers keep a copy but
+		# makes them revalidate it (ETag / Last-Modified -> 304) on every use, so
+		# a config.js written at container start is never served stale.
+		header Cache-Control "no-cache"
 		root * {$LEAD_WWW_ROOT:/var/www}
 		file_server
 		try_files {path} /index.html

@@ -165,7 +165,7 @@ def test_build_pages_generates_all_static_assets_and_clean_demo_routes(tmp_path)
     # 5. Asset references in HTML files use absolute root path
     for html_file in [index_html, demo_html, demo_index_html]:
         content = html_file.read_text(encoding="utf-8")
-        assert '<script src="/config.js"></script>' in content
+        assert '<script src="/config.js?v=2"></script>' in content
 
 
 def test_wrangler_config_integrity():
@@ -309,3 +309,159 @@ def test_webhook_intake_proxy_functional_node():
 
 
 
+
+
+# --- Stale config.js prevention (Task 07O) ------------------------------------
+# Browsers that cached the pre-Turnstile config.js (no site key; served with no
+# Cache-Control, so heuristically "fresh" for days) showed "Verification is not
+# configured". The page now loads a versioned URL and Caddy sends no-cache.
+
+import re  # noqa: E402
+import shutil  # noqa: E402
+import socket  # noqa: E402
+import time  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+import pytest  # noqa: E402
+
+PAGE = REPO_ROOT / "demo" / "lead-form.html"
+CADDYFILE_RENDER = REPO_ROOT / "deploy" / "caddy" / "Caddyfile.render"
+CONFIG_TAG = '<script src="/config.js?v=2"></script>'
+# Fictional value in the shape of a public site key, used only in these tests.
+TEST_SITE_KEY = "0x4TESTPUBLICSITEKEY0000"
+
+
+def test_page_loads_the_versioned_config_url_only():
+    page = PAGE.read_text(encoding="utf-8")
+    assert page.count(CONFIG_TAG) == 1
+    # No other (unversioned or differently versioned) reference to config.js.
+    assert re.findall(r'src="[^"]*config\.js[^"]*"', page) == ['src="/config.js?v=2"']
+    # It still loads before the inline script that reads window.LEAD_FORM_CONFIG.
+    assert page.index(CONFIG_TAG) < page.index("const CONFIG = {")
+
+
+def test_caddyfile_sets_no_cache_only_on_the_static_handler():
+    text = CADDYFILE_RENDER.read_text(encoding="utf-8")
+    static = text[text.index("# Serve static LeadIntel V2 frontend"):]
+    assert 'header Cache-Control "no-cache"' in static
+    assert "file_server" in static and "try_files {path} /index.html" in static
+    # The webhook proxy and the 404 for other webhooks are unchanged.
+    proxy = text[text.index("handle /webhook/lead-intake {"):text.index("handle /webhook/* {")]
+    assert "Cache-Control" not in proxy
+    assert text.count("Cache-Control") == 1
+
+
+def test_runtime_config_still_takes_the_site_key_from_the_environment(tmp_path):
+    script = REPO_ROOT / "deploy" / "docker" / "write-frontend-config.sh"
+    res = subprocess.run(["sh", str(script)], env={"LEAD_WWW_ROOT": str(tmp_path), "TURNSTILE_SITE_KEY": TEST_SITE_KEY,
+                         "PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    config = (tmp_path / "config.js").read_text(encoding="utf-8")
+    assert f'turnstileSiteKey: "{TEST_SITE_KEY}"' in config
+    assert 'webhookUrl: "/webhook/lead-intake"' in config
+    # Dockerfile still runs it at container start, before Caddy.
+    dockerfile = (REPO_ROOT / "deploy" / "docker" / "Dockerfile.caddy").read_text(encoding="utf-8")
+    assert "/usr/local/bin/write-frontend-config.sh && exec caddy run" in dockerfile
+    render = (REPO_ROOT / "render.yaml").read_text(encoding="utf-8")
+    assert "key: TURNSTILE_SITE_KEY" in render
+
+
+def test_no_site_key_or_secret_is_hardcoded_in_shipped_or_deploy_files():
+    files = [PAGE, REPO_ROOT / "demo" / "config.js", CADDYFILE_RENDER, REPO_ROOT / "render.yaml",
+             *sorted((REPO_ROOT / "deploy" / "docker").glob("*")), *sorted((REPO_ROOT / "deploy" / "bin").glob("*.sh"))]
+    for path in files:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        # Real Turnstile keys start with 0x4AAAA…; none may be committed.
+        assert not re.search(r"0x4AAAA[A-Za-z0-9_-]+", text), f"Turnstile key literal in {path}"
+    assert 'turnstileSiteKey: ""' in (REPO_ROOT / "demo" / "config.js").read_text(encoding="utf-8")
+    page = PAGE.read_text(encoding="utf-8")
+    assert "TURNSTILE_SECRET_KEY" not in page and "siteverify" not in page.lower()
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _get(url: str, headers: dict | None = None):
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, dict(r.headers), r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), ""
+
+
+@pytest.fixture
+def local_caddy(tmp_path):
+    """The real deploy/caddy/Caddyfile.render, served by a local caddy binary on 127.0.0.1 only."""
+    caddy = shutil.which("caddy")
+    if caddy is None:
+        pytest.skip("caddy is not installed")
+    www = tmp_path / "www"
+    www.mkdir()
+    shutil.copy(PAGE, www / "index.html")
+    shutil.copy(PAGE, www / "lead-form.html")
+    subprocess.run(["sh", str(REPO_ROOT / "deploy" / "docker" / "write-frontend-config.sh")], check=True,
+                   env={"LEAD_WWW_ROOT": str(www), "TURNSTILE_SITE_KEY": TEST_SITE_KEY, "PATH": "/usr/bin:/bin"})
+    port = _free_port()
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "XDG_DATA_HOME": str(tmp_path / "data"),
+           "XDG_CONFIG_HOME": str(tmp_path / "cfg"), "PORT": str(port), "LEAD_WWW_ROOT": str(www),
+           "N8N_WEBHOOK_TARGET": "127.0.0.1:9", "CADDY_ADMIN": f"127.0.0.1:{_free_port()}"}
+    log = open(tmp_path / "caddy.log", "w")
+    proc = subprocess.Popen([caddy, "run", "--config", str(CADDYFILE_RENDER), "--adapter", "caddyfile"],
+                            env=env, stdout=log, stderr=subprocess.STDOUT)
+    base = f"http://127.0.0.1:{port}"
+    try:
+        for _ in range(100):
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+                break
+            except OSError:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+        else:
+            pytest.fail("caddy did not start")
+        if proc.poll() is not None:
+            pytest.fail("caddy exited: " + (tmp_path / "caddy.log").read_text())
+        yield base
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+        log.close()
+
+
+@pytest.mark.parametrize("path", ["/", "/index.html", "/lead-form.html", "/demo", "/demo/"])
+def test_caddy_html_entry_points_are_no_cache_with_validators(local_caddy, path):
+    status, headers, body = _get(local_caddy + path)
+    assert status == 200
+    assert headers.get("Cache-Control") == "no-cache"
+    assert headers.get("Etag") and headers.get("Last-Modified")
+    assert CONFIG_TAG in body
+    # Existing security headers are unchanged.
+    assert headers.get("X-Content-Type-Options") == "nosniff" and headers.get("X-Frame-Options") == "DENY"
+
+
+@pytest.mark.parametrize("path", ["/config.js", "/config.js?v=2"])
+def test_caddy_config_js_is_no_cache_and_revalidates_with_etag(local_caddy, path):
+    status, headers, body = _get(local_caddy + path)
+    assert status == 200
+    assert headers.get("Cache-Control") == "no-cache"
+    assert headers.get("Content-Type", "").startswith("text/javascript")
+    assert f'turnstileSiteKey: "{TEST_SITE_KEY}"' in body
+    etag = headers.get("Etag")
+    assert etag
+    status, headers, _ = _get(local_caddy + path, {"If-None-Match": etag})
+    assert status == 304
+    assert headers.get("Cache-Control") == "no-cache"
+
+
+def test_caddy_webhook_routing_is_unchanged(local_caddy):
+    status, headers, _ = _get(local_caddy + "/webhook/lead-intake-ai-demo")
+    assert status == 404
+    assert "Cache-Control" not in headers

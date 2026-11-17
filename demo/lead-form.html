@@ -2675,7 +2675,10 @@
   </div>
 </footer>
 
-<script src="/config.js"></script>
+<!-- Versioned URL: browsers that cached the pre-Turnstile config.js (no site
+     key, served without Cache-Control) must not reuse it. Bump only if a
+     cached config.js could again be incompatible with this page. -->
+<script src="/config.js?v=2"></script>
 <script>
 /* =====================================================================
  * LeadIntel intake form
