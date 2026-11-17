@@ -2710,20 +2710,47 @@ function resolveLeadSource(pathname) {
 const TURNSTILE_ACTION = "lead-intake";
 const TURNSTILE_TOKEN_WAIT_MS = 15000;
 
+// Turnstile reports numeric error codes (e.g. 110200 = domain not authorised,
+// 400020 = invalid site key). Only a short digit string is ever shown or logged.
+function safeTurnstileErrorCode(code) {
+  const text = typeof code === "number" && Number.isInteger(code) ? String(code) : code;
+  return typeof text === "string" && /^[0-9]{3,6}$/.test(text) ? text : null;
+}
+
+const TURNSTILE_STATUS_TEXT = {
+  loading: "Loading verification…",
+  pending: "Completing verification…",
+  interactive: "Action needed: tick the verification checkbox above to continue.",
+  ready: "Verification complete.",
+  expired: "Verification expired. Refreshing…",
+  error: "Verification needs attention. Complete the check above, or reload the page if it does not recover.",
+  unsupported: "This browser is not supported by the verification check, so the form cannot be sent. Update your browser or try a different one.",
+  unavailable: "Verification could not load, so the form cannot be sent. Reload the page or try again later.",
+  unconfigured: "Verification is not configured on this site, so the form cannot be sent.",
+};
+
+function turnstileStatusMessage(state, errorCode) {
+  if (state === "error" && errorCode) {
+    return "Verification needs attention (error code " + errorCode + "). Complete the check above, or reload the page if it does not recover.";
+  }
+  return TURNSTILE_STATUS_TEXT[state] || "";
+}
+
 function createTurnstileGate(options) {
   const setTimer = options.setTimer || function(fn, ms) { return setTimeout(fn, ms); };
   const clearTimer = options.clearTimer || function(id) { clearTimeout(id); };
   let widgetId = null;
   let token = null;
+  let errorCode = null;
   let state = options.siteKey ? "loading" : "unconfigured";
   const waiters = [];
 
   function setState(next) {
     state = next;
-    if (options.onState) options.onState(next);
+    if (options.onState) options.onState(next, { errorCode: errorCode });
   }
   function isPermanentFailure() {
-    return state === "unconfigured" || state === "unavailable";
+    return state === "unconfigured" || state === "unavailable" || state === "unsupported";
   }
   function flush() {
     while (waiters.length && (token || isPermanentFailure())) waiters.shift()();
@@ -2743,6 +2770,7 @@ function createTurnstileGate(options) {
 
   return {
     state: function() { return state; },
+    errorCode: function() { return errorCode; },
     render: function() {
       if (!options.siteKey) { setState("unconfigured"); flush(); return false; }
       if (widgetId !== null) return true;
@@ -2757,11 +2785,18 @@ function createTurnstileGate(options) {
           "refresh-expired": "auto",
           callback: function(value) {
             token = typeof value === "string" && value ? value : null;
-            if (token) { setState("ready"); flush(); }
+            if (token) { errorCode = null; setState("ready"); flush(); }
           },
           "expired-callback": function() { token = null; setState("expired"); },
           "timeout-callback": function() { token = null; setState("expired"); },
-          "error-callback": function() { token = null; setState("error"); },
+          "error-callback": function(code) { token = null; errorCode = safeTurnstileErrorCode(code); setState("error"); },
+          // Managed mode may ask the visitor to tick a checkbox; say so instead
+          // of "Completing verification…". The token still arrives via callback.
+          "before-interactive-callback": function() { if (!token) setState("interactive"); },
+          "after-interactive-callback": function() { if (!token && state === "interactive") setState("pending"); },
+          // The browser cannot run the challenge: no token will ever come, so
+          // release any waiting submission at once (still sends nothing).
+          "unsupported-callback": function() { token = null; setState("unsupported"); flush(); },
         });
       } catch (err) {
         widgetId = null;
@@ -2799,6 +2834,19 @@ const INTAKE_TIMEOUT_MS = 120000;
 const VERIFICATION_FAILED_MESSAGE = "Verification failed. Complete the verification and try again.";
 const VERIFICATION_UNAVAILABLE_MESSAGE = "Verification service is temporarily unavailable. Please try again shortly.";
 const VERIFICATION_MISSING_MESSAGE = "Verification is not complete yet. Complete the verification and try again.";
+const VERIFICATION_INTERACTIVE_MESSAGE = "Verification needs you: tick the verification checkbox above the button, then send again.";
+const VERIFICATION_UNSUPPORTED_MESSAGE = "This browser is not supported by the verification check. Update your browser or try a different one, then send again.";
+
+// Banner text when no token was available (nothing was sent). Falls back to
+// the generic VERIFICATION_MISSING_MESSAGE for every other gate state.
+function verificationMissingMessage(gateState, errorCode) {
+  if (gateState === "interactive") return VERIFICATION_INTERACTIVE_MESSAGE;
+  if (gateState === "unsupported") return VERIFICATION_UNSUPPORTED_MESSAGE;
+  if (gateState === "error" && errorCode) {
+    return "Verification failed in the browser (error code " + errorCode + "). Reload the page and try again.";
+  }
+  return null;
+}
 
 // The token travels beside the lead fields, never inside them: n8n moves it
 // into the X-Turnstile-Token header and keeps it out of the lead record.
@@ -3096,17 +3144,11 @@ if (!CONFIG.webhookUrl) {
 const turnstileStatus = document.getElementById("turnstile-status");
 const TURNSTILE_BYPASS = CONFIG.turnstileDisabled &&
   (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-const TURNSTILE_STATUS_TEXT = {
-  loading: "Loading verification…",
-  pending: "Completing verification…",
-  ready: "Verification complete.",
-  expired: "Verification expired. Refreshing…",
-  error: "Verification needs attention. Complete the check above, or reload the page if it does not recover.",
-  unavailable: "Verification could not load, so the form cannot be sent. Reload the page or try again later.",
-  unconfigured: "Verification is not configured on this site, so the form cannot be sent.",
-};
-function showTurnstileState(state) {
-  if (turnstileStatus) turnstileStatus.textContent = TURNSTILE_STATUS_TEXT[state] || "";
+function showTurnstileState(state, detail) {
+  const errorCode = detail && detail.errorCode;
+  if (state === "error") console.warn("[lead-form] Turnstile error code:", errorCode || "unknown");
+  if (state === "unsupported") console.warn("[lead-form] Turnstile: browser not supported");
+  if (turnstileStatus) turnstileStatus.textContent = turnstileStatusMessage(state, errorCode);
 }
 const turnstileGate = TURNSTILE_BYPASS ? null : createTurnstileGate({
   siteKey: CONFIG.turnstileSiteKey,
@@ -3571,7 +3613,8 @@ async function handleSubmit(event) {
 
   if (result.kind === "verification_missing") {
     // No request was sent; the same external_id is reused on the next attempt.
-    banner.textContent = VERIFICATION_MISSING_MESSAGE;
+    banner.textContent = (turnstileGate &&
+      verificationMissingMessage(turnstileGate.state(), turnstileGate.errorCode())) || VERIFICATION_MISSING_MESSAGE;
     banner.className = "form-banner error";
     return;
   }

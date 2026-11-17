@@ -29,7 +29,9 @@ HARNESS = r"""
 const [blocks, payloadJson, scenario] = [process.argv[1], process.argv[2], process.argv[3]];
 const lib = new Function(blocks + `; return { createTurnstileGate, submitIntake, buildWebhookBody,
   classifyIntakeResponse, TURNSTILE_ACTION, TURNSTILE_TOKEN_WAIT_MS, INTAKE_TIMEOUT_MS,
-  VERIFICATION_FAILED_MESSAGE, VERIFICATION_UNAVAILABLE_MESSAGE, VERIFICATION_MISSING_MESSAGE };`)();
+  VERIFICATION_FAILED_MESSAGE, VERIFICATION_UNAVAILABLE_MESSAGE, VERIFICATION_MISSING_MESSAGE,
+  VERIFICATION_INTERACTIVE_MESSAGE, VERIFICATION_UNSUPPORTED_MESSAGE, verificationMissingMessage,
+  safeTurnstileErrorCode, turnstileStatusMessage, TURNSTILE_STATUS_TEXT };`)();
 const PAYLOAD = JSON.parse(payloadJson);
 
 function fakeApi() {
@@ -451,6 +453,10 @@ window.fetch = function(url, init) {
 window.turnstile = {
   render: function(el, opts) {
     if (window.__scenario.token) setTimeout(function() { opts.callback("stub-token-" + "x".repeat(16)); }, 100);
+    // Scripted widget events: [{at: ms, call: "<turnstile callback name>", arg: value}]
+    (window.__scenario.steps || []).forEach(function(step) {
+      setTimeout(function() { opts[step.call](step.arg); }, step.at);
+    });
     return "widget-1";
   },
   reset: function() {},
@@ -464,12 +470,15 @@ window.addEventListener("load", function() { setTimeout(function() {
   set("name", "Synthetic Test Lead"); set("email", "e2e-turnstile-check@example.com");
   set("company", "Example Synthetic Org");
   set("message", "Synthetic end-to-end verification submission. Please disregard this record.");
+  window.__statusAtSubmit = document.getElementById("turnstile-status").textContent;
   document.getElementById("lead-form").requestSubmit();
   setTimeout(function() {
     const b = document.getElementById("banner"), cs = getComputedStyle(b), rect = b.getBoundingClientRect();
     const probe = document.createElement("div"); probe.className = "form-banner error";
     b.parentNode.insertBefore(probe, b); const errorColor = getComputedStyle(probe).color; probe.remove();
     const out = {
+      statusAtSubmit: window.__statusAtSubmit,
+      statusText: document.getElementById("turnstile-status").textContent,
       bannerText: b.textContent, bannerClass: b.className, bannerDisplay: cs.display,
       bannerHeight: Math.round(rect.height), bannerInlineDeclarations: b.style.length,
       bannerColorIsErrorColor: cs.color === errorColor,
@@ -503,7 +512,11 @@ def _run_page_in_browser(tmp_path: Path, scenario: dict) -> dict:
     page_file.write_text(page, encoding="utf-8")
     args = [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
             f"--user-data-dir={tmp_path / 'profile'}", "--window-size=1366,768",
-            "--virtual-time-budget=30000", "--dump-dom", page_file.as_uri() + "?view=demo"]
+            "--virtual-time-budget=30000",
+            # Fully offline: no DNS for any host (page fonts included), so the
+            # run is deterministic and can never reach production.
+            "--host-resolver-rules=MAP * ~NOTFOUND",
+            "--dump-dom", page_file.as_uri() + "?view=demo"]
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         args.insert(1, "--no-sandbox")
     res = subprocess.run(args, capture_output=True, text=True, timeout=120)
@@ -572,3 +585,196 @@ def test_browser_successful_submission_is_unchanged(tmp_path):
         "url": "/webhook/lead-intake", "method": "POST",
         "keys": ["company", "demo_insights", "email", "external_id", "message", "name", "source", "turnstile_token"],
     }]
+
+
+# --- Turnstile interaction, unsupported browsers and error codes (Task 07I) -------
+
+
+def test_gate_registers_interactive_and_unsupported_callbacks():
+    out = run("""
+      const api = fakeApi(), t = fakeTimers(); const { gate } = makeGate(api, t); gate.render();
+      return ["before-interactive-callback", "after-interactive-callback", "unsupported-callback"]
+        .map((k) => typeof api.opts[k]);
+    """)
+    assert out == ["function", "function", "function"]
+
+
+def test_interactive_challenge_waits_for_the_token_and_then_submits():
+    out = run("""
+      const api = fakeApi(), t = fakeTimers(); const { gate, states } = makeGate(api, t); gate.render();
+      api.opts["before-interactive-callback"]();
+      const during = gate.state();
+      const f = fakeFetch([{ status: 201, data: { outcome: "created", lead: { lead_id: 7 } } }]);
+      const pending = lib.submitIntake({ url: "/w", payload: PAYLOAD, gate, tokenWaitMs: 15000,
+        timeoutMs: 120000, fetchImpl: f.impl, setTimer: t.set, clearTimer: t.clear });
+      await tick();
+      const fetchesWhileWaiting = f.calls.length;
+      api.opts["after-interactive-callback"](); const after = gate.state();
+      api.opts.callback("tok-solved");
+      const r = await pending;
+      return { during, after, fetchesWhileWaiting, kind: r.kind, token: f.calls[0].body.turnstile_token,
+               resets: api.resets.length, states };
+    """)
+    assert out["during"] == "interactive"
+    assert out["after"] == "pending"
+    assert out["fetchesWhileWaiting"] == 0
+    assert out["kind"] == "created" and out["token"] == "tok-solved"
+    assert out["resets"] == 1  # the one-time token was consumed and the widget reset
+    assert out["states"] == ["pending", "interactive", "pending", "ready", "pending"]
+
+
+def test_unanswered_interactive_challenge_times_out_without_a_request():
+    out = run("""
+      const api = fakeApi(), t = fakeTimers(); const { gate } = makeGate(api, t); gate.render();
+      api.opts["before-interactive-callback"]();
+      const f = fakeFetch([{ status: 201, data: {} }]);
+      const pending = lib.submitIntake({ url: "/w", payload: PAYLOAD, gate, tokenWaitMs: 15000,
+        timeoutMs: 120000, fetchImpl: f.impl, setTimer: t.set, clearTimer: t.clear });
+      await tick(); t.fireAll();
+      const r = await pending;
+      return { kind: r.kind, fetches: f.calls.length, state: gate.state(),
+               message: lib.verificationMissingMessage(gate.state(), gate.errorCode()) };
+    """)
+    assert out == {"kind": "verification_missing", "fetches": 0, "state": "interactive",
+                   "message": "Verification needs you: tick the verification checkbox above the button, then send again."}
+
+
+def test_after_interactive_does_not_override_a_token_that_already_arrived():
+    out = run("""
+      const api = fakeApi(), t = fakeTimers(); const { gate } = makeGate(api, t); gate.render();
+      api.opts["before-interactive-callback"](); api.opts.callback("tok-1"); api.opts["after-interactive-callback"]();
+      return { state: gate.state(), has: gate.hasToken() };
+    """)
+    assert out == {"state": "ready", "has": True}
+
+
+def test_unsupported_browser_fails_closed_immediately_and_releases_waiters():
+    out = run("""
+      const api = fakeApi(), t = fakeTimers(); const { gate } = makeGate(api, t); gate.render();
+      const waiting = gate.takeToken(15000); await tick();
+      api.opts["unsupported-callback"]();
+      const released = await waiting;
+      const f = fakeFetch([{ status: 201, data: {} }]);
+      const r = await lib.submitIntake({ url: "/w", payload: PAYLOAD, gate, tokenWaitMs: 15000,
+        timeoutMs: 120000, fetchImpl: f.impl, setTimer: t.set, clearTimer: t.clear });
+      return { released, kind: r.kind, fetches: f.calls.length, timersLeft: t.count(), state: gate.state(),
+               message: lib.verificationMissingMessage(gate.state(), gate.errorCode()) };
+    """)
+    assert out == {"released": None, "kind": "verification_missing", "fetches": 0, "timersLeft": 0,
+                   "state": "unsupported",
+                   "message": "This browser is not supported by the verification check. Update your browser or try a different one, then send again."}
+
+
+def test_error_code_is_recorded_reported_and_cleared_on_recovery():
+    out = run("""
+      const api = fakeApi(), t = fakeTimers();
+      const seen = []; const { gate } = makeGate(api, t, { onState: (s, d) => seen.push([s, d && d.errorCode]) });
+      gate.render(); api.opts["error-callback"]("110200");
+      const during = { state: gate.state(), code: gate.errorCode(),
+        status: lib.turnstileStatusMessage(gate.state(), gate.errorCode()),
+        missing: lib.verificationMissingMessage(gate.state(), gate.errorCode()) };
+      api.opts.callback("tok-2");
+      return { during, after: { state: gate.state(), code: gate.errorCode() }, seen };
+    """)
+    assert out["during"] == {
+        "state": "error", "code": "110200",
+        "status": "Verification needs attention (error code 110200). Complete the check above, or reload the page if it does not recover.",
+        "missing": "Verification failed in the browser (error code 110200). Reload the page and try again.",
+    }
+    assert out["after"] == {"state": "ready", "code": None}
+    assert out["seen"] == [["pending", None], ["error", "110200"], ["ready", None]]
+
+
+@pytest.mark.parametrize(
+    ("raw", "safe"),
+    [("110200", "110200"), (300030, "300030"), ("600010", "600010"), ("", None), (None, None), ("abc", None),
+     ("12", None), ("1234567", None), ("<img src=x>", None), ("0x4AAAAAAAsecret", None), (1.5, None)],
+)
+def test_only_short_numeric_error_codes_are_exposed(raw, safe):
+    out = run(f"return {{ code: lib.safeTurnstileErrorCode({json.dumps(raw)}) }};")
+    assert out == {"code": safe}
+
+
+def test_error_without_a_code_keeps_the_generic_messages():
+    out = run("""
+      return { status: lib.turnstileStatusMessage("error", null),
+               missing: lib.verificationMissingMessage("error", null),
+               pending: lib.verificationMissingMessage("pending", null) };
+    """)
+    assert out == {
+        "status": "Verification needs attention. Complete the check above, or reload the page if it does not recover.",
+        "missing": None, "pending": None,
+    }
+
+
+def test_status_text_covers_every_gate_state():
+    out = run("return Object.keys(lib.TURNSTILE_STATUS_TEXT).sort();")
+    assert out == sorted(["loading", "pending", "interactive", "ready", "expired", "error",
+                          "unsupported", "unavailable", "unconfigured"])
+
+
+def test_page_uses_state_specific_message_when_no_token_was_available():
+    handler = _handle_submit()
+    assert "verificationMissingMessage(turnstileGate.state(), turnstileGate.errorCode())" in handler
+    assert "|| VERIFICATION_MISSING_MESSAGE" in handler
+    page = _page()
+    assert "function showTurnstileState(state, detail)" in page
+    assert "turnstileStatusMessage(state, errorCode)" in page
+
+
+# Browser: what the visitor actually sees, on the real page (offline stubs).
+
+_INTERACTIVE_MSG = "Action needed: tick the verification checkbox above to continue."
+
+
+def test_browser_interactive_challenge_prompts_and_no_request_without_a_click(tmp_path):
+    out = _run_page_in_browser(tmp_path, {
+        "token": False, "steps": [{"at": 50, "call": "before-interactive-callback"}],
+        "response": {"status": 201, "data": {}}})
+    assert out["statusAtSubmit"] == _INTERACTIVE_MSG
+    _assert_visible_error(out, "Verification needs you: tick the verification checkbox above the button, then send again.")
+    assert out["fetches"] == []
+
+
+def test_browser_interactive_challenge_solved_then_submission_succeeds(tmp_path):
+    lead = {"lead_id": 102, "name": "Synthetic Test Lead", "email": "e2e-turnstile-check@example.com",
+            "company": "Example Synthetic Org", "source": "website-demo-contact-form", "status": "new",
+            "created_at": "2026-11-17T12:00:00Z", "score": 63, "score_reason": "x"}
+    out = _run_page_in_browser(tmp_path, {
+        "token": False,
+        "steps": [{"at": 50, "call": "before-interactive-callback"},
+                  {"at": 2000, "call": "after-interactive-callback"},
+                  {"at": 2100, "call": "callback", "arg": "stub-token-solved-xxxxxxxx"}],
+        "response": {"status": 201, "data": {"outcome": "created", "lead": lead, "score": 63}}})
+    assert out["statusAtSubmit"] == _INTERACTIVE_MSG
+    assert out["outcomeVisible"] is True and out["bannerText"] == ""
+    assert len(out["fetches"]) == 1 and "turnstile_token" in out["fetches"][0]["keys"]
+
+
+def test_browser_unsupported_browser_message_and_no_request(tmp_path):
+    out = _run_page_in_browser(tmp_path, {
+        "token": False, "steps": [{"at": 50, "call": "unsupported-callback"}],
+        "response": {"status": 201, "data": {}}})
+    assert out["statusText"].startswith("This browser is not supported by the verification check")
+    _assert_visible_error(out, "This browser is not supported by the verification check. Update your browser or try a different one, then send again.")
+    assert out["fetches"] == []
+
+
+def test_browser_error_code_is_shown_and_recovery_still_submits(tmp_path):
+    out = _run_page_in_browser(tmp_path, {
+        "token": False,
+        "steps": [{"at": 50, "call": "error-callback", "arg": "110200"},
+                  {"at": 3000, "call": "callback", "arg": "stub-token-recovered-xxxxx"}],
+        "response": {"status": 201, "data": {"outcome": "created", "lead": {"lead_id": 103}, "score": 63}}})
+    assert out["statusAtSubmit"] == ("Verification needs attention (error code 110200). Complete the check above, "
+                                     "or reload the page if it does not recover.")
+    assert out["outcomeVisible"] is True
+    assert len(out["fetches"]) == 1
+
+
+def test_browser_unrecovered_error_code_is_shown_in_the_banner(tmp_path):
+    out = _run_page_in_browser(tmp_path, {
+        "token": False, "steps": [{"at": 50, "call": "error-callback", "arg": "110200"}],
+        "response": {"status": 201, "data": {}}})
+    _assert_visible_error(out, "Verification failed in the browser (error code 110200). Reload the page and try again.")
+    assert out["fetches"] == []
