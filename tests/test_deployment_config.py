@@ -98,7 +98,10 @@ def test_caddy_dockerfile_strips_file_capabilities():
     assert "test -z \"$(getcap /usr/bin/caddy)\"" in content, "Dockerfile.caddy must verify capabilities are removed"
     assert "ENV PORT=10000" in content, "Dockerfile.caddy must set PORT=10000"
     assert "COPY deploy/caddy/Caddyfile.render /etc/caddy/Caddyfile" in content, "Caddyfile must be copied"
-    assert "webhookUrl: \"/webhook/lead-intake\"" in content, "Must retain same-origin webhook URL in config.js"
+    # config.js is written at container start (public Turnstile site key from the environment).
+    assert "write-frontend-config.sh && exec caddy run --config /etc/caddy/Caddyfile" in content
+    start_script = (REPO_ROOT / "deploy" / "docker" / "write-frontend-config.sh").read_text(encoding="utf-8")
+    assert "webhookUrl: \"/webhook/lead-intake\"" in start_script, "Must retain same-origin webhook URL in config.js"
 
 
 def test_build_pages_generates_all_static_assets_and_clean_demo_routes(tmp_path):

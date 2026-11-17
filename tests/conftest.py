@@ -18,6 +18,12 @@ SQL_DIR = PROJECT_ROOT / "sql"
 # variable. .env itself is never printed.
 load_dotenv(PROJECT_ROOT / ".env")
 
+# Explicit test configuration: the suite's API tests post leads without a
+# Turnstile token, so verification is switched off here (the setting is never
+# honoured in production). tests/test_turnstile.py re-enables it per test and
+# mocks every Cloudflare call; no test needs a real Turnstile secret.
+os.environ["TURNSTILE_ENABLED"] = "false"
+
 
 def _require_test_database_url() -> str:
     url = os.environ.get("TEST_DATABASE_URL", "").strip()

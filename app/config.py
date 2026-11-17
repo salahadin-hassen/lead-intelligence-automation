@@ -32,10 +32,28 @@ class Settings(BaseSettings):
     app_env: str = "development"
     render: bool = False
     api_auth_token: str | None = None
+    # Cloudflare Turnstile verification for POST /leads (app/turnstile.py).
+    # Enforced by default. TURNSTILE_ENABLED=false is honoured only outside
+    # production (local development, the test suite); production always
+    # verifies, and a missing secret there fails closed with HTTP 503.
+    turnstile_enabled: bool = True
+    turnstile_secret_key: str | None = None
+    # Comma-separated, matched exactly against Siteverify's "hostname".
+    turnstile_allowed_hostnames: str = ""
+    turnstile_expected_action: str = "lead-intake"
+    turnstile_timeout_seconds: float = 5.0
 
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() in ("production", "prod") or self.render
+
+    @property
+    def turnstile_required(self) -> bool:
+        return self.is_production or self.turnstile_enabled
+
+    @property
+    def turnstile_hostnames(self) -> frozenset[str]:
+        return frozenset(h.strip() for h in self.turnstile_allowed_hostnames.split(",") if h.strip())
 
 
 @lru_cache

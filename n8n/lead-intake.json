@@ -24,7 +24,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// --- configuration -------------------------------------------------\n// Single configuration source for the whole workflow: base URL of the\n// FastAPI service (no trailing slash, no /leads) AND the lead\n// qualification threshold (integer 0-100). Override them with the\n// LEAD_API_BASE_URL / LEAD_QUALIFIED_THRESHOLD environment variables of\n// the n8n process. n8n 2.x blocks $env in expressions and Code nodes by\n// default (N8N_BLOCK_ENV_ACCESS_IN_NODE), so each lookup is probed\n// defensively and falls back to the documented defaults below. The\n// *Source fields record which source was used and are visible in every\n// execution; downstream nodes read this configuration from this node's\n// output with $('Prepare Lead Payload') - the values are never repeated\n// in another node.\nconst DEFAULT_API_BASE_URL = 'http://localhost:8000';\n// Initial business rule, NOT an empirically validated sales threshold:\n// the heuristic scorer starts at a baseline of 45; representative leads\n// score 12-35 (junk), 63 (corporate inbound without an intent keyword)\n// and 77-100 (explicit buying intent), so 70 sits in the observed 63-77\n// gap and requires net positive signal above baseline. Tune it with\n// LEAD_QUALIFIED_THRESHOLD (0-100).\nconst DEFAULT_QUALIFIED_THRESHOLD = 70;\n\nlet apiBaseUrl = DEFAULT_API_BASE_URL;\nlet apiBaseUrlSource = 'workflow-default';\ntry {\n  const fromEnv = $env.LEAD_API_BASE_URL;\n  if (fromEnv) {\n    apiBaseUrl = String(fromEnv).replace(/\\/+$/, '');\n    apiBaseUrlSource = 'environment';\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE) or unavailable.\n  apiBaseUrlSource = 'workflow-default (n8n blocks $env access)';\n}\n\nlet qualifiedThreshold = DEFAULT_QUALIFIED_THRESHOLD;\nlet thresholdSource = 'workflow-default';\ntry {\n  const fromEnv = $env.LEAD_QUALIFIED_THRESHOLD;\n  if (fromEnv !== undefined && fromEnv !== null && String(fromEnv).trim() !== '') {\n    const parsed = Number(fromEnv);\n    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 100) {\n      qualifiedThreshold = parsed;\n      thresholdSource = 'environment';\n    } else {\n      thresholdSource = 'workflow-default (invalid LEAD_QUALIFIED_THRESHOLD)';\n    }\n  }\n} catch (err) {\n  thresholdSource = 'workflow-default (n8n blocks $env access)';\n}\n\n// --- payload mapping ------------------------------------------------\n// FastAPI owns validation, persistence, duplicate detection and scoring.\n// This node only copies the documented contract fields out of the webhook\n// body and drops everything else - no validation rules are re-implemented.\nconst body = $input.first().json.body || {};\n\nconst lead = {\n  name: body.name ?? null,\n  email: body.email ?? null,\n  company: body.company ?? null,\n  message: body.message ?? null,\n  source: body.source || 'n8n-webhook',\n  external_id: body.external_id ?? null,\n};\n\nreturn [{\n  json: {\n    lead,\n    apiLeadsUrl: `${apiBaseUrl}/leads`,\n    apiBaseUrlSource,\n    qualifiedThreshold,\n    thresholdSource,\n  },\n}];"
+        "jsCode": "// --- configuration -------------------------------------------------\n// Single configuration source for the whole workflow: base URL of the\n// FastAPI service (no trailing slash, no /leads) AND the lead\n// qualification threshold (integer 0-100). Override them with the\n// LEAD_API_BASE_URL / LEAD_QUALIFIED_THRESHOLD environment variables of\n// the n8n process. n8n 2.x blocks $env in expressions and Code nodes by\n// default (N8N_BLOCK_ENV_ACCESS_IN_NODE), so each lookup is probed\n// defensively and falls back to the documented defaults below. The\n// *Source fields record which source was used and are visible in every\n// execution; downstream nodes read this configuration from this node's\n// output with $('Prepare Lead Payload') - the values are never repeated\n// in another node.\nconst DEFAULT_API_BASE_URL = 'http://localhost:8000';\n// Initial business rule, NOT an empirically validated sales threshold:\n// the heuristic scorer starts at a baseline of 45; representative leads\n// score 12-35 (junk), 63 (corporate inbound without an intent keyword)\n// and 77-100 (explicit buying intent), so 70 sits in the observed 63-77\n// gap and requires net positive signal above baseline. Tune it with\n// LEAD_QUALIFIED_THRESHOLD (0-100).\nconst DEFAULT_QUALIFIED_THRESHOLD = 70;\n\nlet apiBaseUrl = DEFAULT_API_BASE_URL;\nlet apiBaseUrlSource = 'workflow-default';\ntry {\n  const fromEnv = $env.LEAD_API_BASE_URL;\n  if (fromEnv) {\n    apiBaseUrl = String(fromEnv).replace(/\\/+$/, '');\n    apiBaseUrlSource = 'environment';\n  }\n} catch (err) {\n  // $env denied (N8N_BLOCK_ENV_ACCESS_IN_NODE) or unavailable.\n  apiBaseUrlSource = 'workflow-default (n8n blocks $env access)';\n}\n\nlet qualifiedThreshold = DEFAULT_QUALIFIED_THRESHOLD;\nlet thresholdSource = 'workflow-default';\ntry {\n  const fromEnv = $env.LEAD_QUALIFIED_THRESHOLD;\n  if (fromEnv !== undefined && fromEnv !== null && String(fromEnv).trim() !== '') {\n    const parsed = Number(fromEnv);\n    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 100) {\n      qualifiedThreshold = parsed;\n      thresholdSource = 'environment';\n    } else {\n      thresholdSource = 'workflow-default (invalid LEAD_QUALIFIED_THRESHOLD)';\n    }\n  }\n} catch (err) {\n  thresholdSource = 'workflow-default (n8n blocks $env access)';\n}\n\n// --- payload mapping ------------------------------------------------\n// FastAPI owns validation, persistence, duplicate detection and scoring.\n// This node only copies the documented contract fields out of the webhook\n// body and drops everything else - no validation rules are re-implemented.\nconst body = $input.first().json.body || {};\n\nconst lead = {\n  name: body.name ?? null,\n  email: body.email ?? null,\n  company: body.company ?? null,\n  message: body.message ?? null,\n  source: body.source || 'n8n-webhook',\n  external_id: body.external_id ?? null,\n};\n\n// Cloudflare Turnstile token for FastAPI's X-Turnstile-Token header. It is\n// kept OUT of `lead`, so it is never part of the lead body or stored; FastAPI\n// verifies it once with Cloudflare (tokens are single-use). Anything that is\n// not a non-empty string of at most 2048 characters becomes '' and FastAPI\n// rejects the submission (fail closed). Request headers are never read here.\nconst rawTurnstileToken = body.turnstile_token;\nconst turnstileToken =\n  typeof rawTurnstileToken === 'string' && rawTurnstileToken.length > 0 && rawTurnstileToken.length <= 2048\n    ? rawTurnstileToken\n    : '';\n\nreturn [{\n  json: {\n    lead,\n    turnstileToken,\n    apiLeadsUrl: `${apiBaseUrl}/leads`,\n    apiBaseUrlSource,\n    qualifiedThreshold,\n    thresholdSource,\n  },\n}];"
       },
       "id": "5f1d2a10-0000-4000-8000-000000000002",
       "name": "Prepare Lead Payload",
@@ -50,6 +50,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-Turnstile-Token",
+              "value": "={{ $json.turnstileToken }}"
             }
           ]
         },
@@ -152,6 +156,52 @@
               },
               "renameOutput": true,
               "outputKey": "validation_failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-verification-failed",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 403,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "verification_failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "id": "cond-verification-unavailable",
+                    "leftValue": "={{ $json.statusCode }}",
+                    "rightValue": 503,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "verification_unavailable"
             }
           ]
         },
@@ -769,6 +819,40 @@
         1680,
         -640
       ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ outcome: 'verification_failed', apiStatus: 403, detail: 'Verification failed. Complete the verification and try again.', message: 'Verification failed. Complete the verification and try again.' }) }}",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "b5f0c1a2-7d3e-4f61-9a20-05b0000000a1",
+      "name": "Respond Verification Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ outcome: 'verification_unavailable', apiStatus: 503, detail: 'Verification service is temporarily unavailable. Please try again shortly.', message: 'Verification service is temporarily unavailable. Please try again shortly.' }) }}",
+        "options": {
+          "responseCode": 503
+        }
+      },
+      "id": "b5f0c1a2-7d3e-4f61-9a20-05b0000000a2",
+      "name": "Respond Verification Unavailable",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        960,
+        560
+      ]
     }
   ],
   "connections": {
@@ -829,6 +913,20 @@
         [
           {
             "node": "Respond Validation Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Verification Failed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Verification Unavailable",
             "type": "main",
             "index": 0
           }

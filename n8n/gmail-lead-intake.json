@@ -124,6 +124,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-Intake-Channel",
+              "value": "gmail"
             }
           ]
         },

@@ -4,11 +4,11 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app import db, insights, scoring
+from app import db, insights, scoring, turnstile
 from app.config import Settings, get_settings
 from app.errors import DuplicateLeadError
 from app.insights import InsightsGenerator
@@ -69,6 +69,42 @@ def verify_api_token(
 router = APIRouter(dependencies=[Depends(verify_api_token)])
 
 
+def get_turnstile_verifier() -> turnstile.TurnstileVerifier:
+    """Injected so tests replace the Cloudflare call without the network."""
+    return turnstile.verify_token
+
+
+def require_verified_submission(
+    x_turnstile_token: str | None = Header(default=None, alias="X-Turnstile-Token"),
+    x_intake_channel: str | None = Header(default=None, alias="X-Intake-Channel"),
+    settings: Settings = Depends(get_settings),
+    verifier: turnstile.TurnstileVerifier = Depends(get_turnstile_verifier),
+) -> None:
+    """Gate lead creation on a verified Turnstile challenge.
+
+    Runs after the router-level bearer check (only n8n holds that token) and
+    before the body is validated, stored or scored. The single exemption is
+    the exact `X-Intake-Channel: gmail` header, which only the server-side
+    Gmail workflow sets; the website workflows send fixed headers and never
+    forward the public caller's headers, and the JSON `source` is never
+    consulted here.
+    """
+    if x_intake_channel == turnstile.GMAIL_CHANNEL:
+        return
+    if not settings.turnstile_required:
+        return
+    result = verifier(x_turnstile_token, settings)
+    if result.outcome == "valid":
+        return
+    if result.outcome == "rejected":
+        logger.warning("Lead submission rejected: Turnstile verification failed (%s)", result.reason)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Submission verification failed")
+    logger.error("Lead submission refused: Turnstile verification unavailable (%s)", result.reason)
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Submission verification is unavailable"
+    )
+
+
 def _to_response(row: dict) -> LeadResponse:
     return LeadResponse(
         lead_id=row["id"],
@@ -120,7 +156,12 @@ def _build_csv(rows: list[dict]) -> str:
     return buffer.getvalue()
 
 
-@router.post("/leads", response_model=LeadResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/leads",
+    response_model=LeadResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_verified_submission)],
+)
 def create_lead(lead: LeadCreate, scorer: Scorer = Depends(get_scorer)) -> LeadResponse:
     try:
         row = db.create_lead(lead)

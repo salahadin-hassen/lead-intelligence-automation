@@ -29,13 +29,21 @@
 		max_size 256KB
 	}
 
-	# Same-origin webhook proxy to n8n
-	handle /webhook/* {
+	# Same-origin proxy for the ONE public webhook the website uses. Other n8n
+	# webhooks (e.g. the experimental lead-intake-ai-demo) are not forwarded.
+	# This only narrows this proxy: n8n's own public hostname is still
+	# reachable directly, and FastAPI's Turnstile gate on POST /leads is what
+	# protects lead creation on every path.
+	handle /webhook/lead-intake {
 		reverse_proxy {$N8N_WEBHOOK_TARGET:127.0.0.1:5678} {
 			header_up Host {upstream_hostport}
 			header_up X-Forwarded-Host {host}
 			header_up X-Forwarded-Proto https
 		}
+	}
+
+	handle /webhook/* {
+		respond 404
 	}
 
 	# Serve static LeadIntel V2 frontend

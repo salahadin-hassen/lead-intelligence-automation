@@ -15,13 +15,15 @@ COPY demo/lead-form.html /var/www/lead-form.html
 # Copy Caddy configuration for Render
 COPY deploy/caddy/Caddyfile.render /etc/caddy/Caddyfile
 
-# Generate same-origin config.js by default
-RUN echo 'window.LEAD_FORM_CONFIG = { webhookUrl: "/webhook/lead-intake" };' > /var/www/config.js
+# config.js (same-origin webhookUrl: "/webhook/lead-intake" plus the PUBLIC
+# Turnstile site key from TURNSTILE_SITE_KEY) is written at container start.
+COPY deploy/docker/write-frontend-config.sh /usr/local/bin/write-frontend-config.sh
+RUN chmod 0755 /usr/local/bin/write-frontend-config.sh
 
 ENV PORT=10000
 ENV LEAD_WWW_ROOT=/var/www
 
 EXPOSE 10000
 
-CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile"]
+CMD ["sh", "-c", "/usr/local/bin/write-frontend-config.sh && exec caddy run --config /etc/caddy/Caddyfile"]
 

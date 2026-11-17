@@ -2011,6 +2011,10 @@
       transition-duration: 0.01ms !important;
     }
   }
+
+  /* Cloudflare Turnstile widget (reserves its 65px height to avoid layout shift) */
+  .turnstile-block { margin: 4px 0 16px; }
+  .turnstile-widget { min-height: 65px; }
 </style>
 </head>
 <body>
@@ -2338,6 +2342,11 @@
               </div>
               <div class="field-hint" id="message-hint">A concise description is sufficient. Do not include confidential data.</div>
               <div class="field-error" id="message-error" aria-live="polite"></div>
+            </div>
+
+            <div class="turnstile-block">
+              <div id="turnstile-widget" class="turnstile-widget"></div>
+              <p class="field-hint" id="turnstile-status" aria-live="polite"></p>
             </div>
 
             <button type="submit" id="submit-btn" class="btn-primary submit-btn-full">
@@ -2673,8 +2682,174 @@
  * ===================================================================== */
 const CONFIG = {
   webhookUrl: (window.LEAD_FORM_CONFIG || {}).webhookUrl || "",
-  source: "website-contact-form",
+  // PUBLIC Cloudflare Turnstile site key (never the secret).
+  turnstileSiteKey: (window.LEAD_FORM_CONFIG || {}).turnstileSiteKey || "",
+  // Local development only; honoured exclusively on localhost / 127.0.0.1.
+  turnstileDisabled: (window.LEAD_FORM_CONFIG || {}).turnstileDisabled === true,
 };
+
+/* LEAD_SOURCE_START — pure helper (tested in tests/test_lead_source.py)
+ * Classifies a submission by URL path only. Exactly /demo and /demo/ are demo;
+ * every other path (including /, unknown paths, and ?view=demo or #demo on
+ * another path) keeps the ordinary website source. The demo value keeps
+ * "contact-form" so the heuristic scorer weights it exactly like a website
+ * enquiry. Resolved at submit time because the page switches between / and
+ * /demo with history.pushState, without reloading. */
+const LEAD_SOURCE_WEBSITE = "website-contact-form";
+const LEAD_SOURCE_DEMO = "website-demo-contact-form";
+function resolveLeadSource(pathname) {
+  return pathname === "/demo" || pathname === "/demo/" ? LEAD_SOURCE_DEMO : LEAD_SOURCE_WEBSITE;
+}
+/* LEAD_SOURCE_END */
+
+/* TURNSTILE_GATE_START — Cloudflare Turnstile client gate (tested in tests/test_turnstile_frontend.py)
+ * Fail closed: the form is never sent without a fresh token. Tokens are
+ * single-use and short-lived, so takeToken() hands each token out exactly once
+ * and immediately resets the widget; a retry therefore always waits for a new
+ * token. Only the PUBLIC site key is used here; the secret stays on the API. */
+const TURNSTILE_ACTION = "lead-intake";
+const TURNSTILE_TOKEN_WAIT_MS = 15000;
+
+function createTurnstileGate(options) {
+  const setTimer = options.setTimer || function(fn, ms) { return setTimeout(fn, ms); };
+  const clearTimer = options.clearTimer || function(id) { clearTimeout(id); };
+  let widgetId = null;
+  let token = null;
+  let state = options.siteKey ? "loading" : "unconfigured";
+  const waiters = [];
+
+  function setState(next) {
+    state = next;
+    if (options.onState) options.onState(next);
+  }
+  function isPermanentFailure() {
+    return state === "unconfigured" || state === "unavailable";
+  }
+  function flush() {
+    while (waiters.length && (token || isPermanentFailure())) waiters.shift()();
+  }
+  function consume() {
+    const value = token;
+    token = null;
+    if (value !== null) {
+      setState("pending");
+      const api = options.getApi();
+      if (api && widgetId !== null) {
+        try { api.reset(widgetId); } catch (err) { setState("error"); }
+      }
+    }
+    return value;
+  }
+
+  return {
+    state: function() { return state; },
+    render: function() {
+      if (!options.siteKey) { setState("unconfigured"); flush(); return false; }
+      if (widgetId !== null) return true;
+      if (state === "unavailable") return false;
+      const api = options.getApi();
+      if (!api || typeof api.render !== "function") return false;
+      setState("pending");
+      try {
+        widgetId = api.render(options.container, {
+          sitekey: options.siteKey,
+          action: TURNSTILE_ACTION,
+          "refresh-expired": "auto",
+          callback: function(value) {
+            token = typeof value === "string" && value ? value : null;
+            if (token) { setState("ready"); flush(); }
+          },
+          "expired-callback": function() { token = null; setState("expired"); },
+          "timeout-callback": function() { token = null; setState("expired"); },
+          "error-callback": function() { token = null; setState("error"); },
+        });
+      } catch (err) {
+        widgetId = null;
+        token = null;
+        setState("unavailable");
+        flush();
+        return false;
+      }
+      return true;
+    },
+    // The Turnstile script itself failed to load: nothing can be verified.
+    markUnavailable: function() { token = null; setState("unavailable"); flush(); },
+    hasToken: function() { return token !== null; },
+    // Resolves with a never-before-used token, or null (fail closed).
+    takeToken: function(waitMs) {
+      if (token) return Promise.resolve(consume());
+      if (isPermanentFailure()) return Promise.resolve(null);
+      return new Promise(function(resolve) {
+        let timer = null;
+        const waiter = function() { clearTimer(timer); resolve(consume()); };
+        timer = setTimer(function() {
+          const i = waiters.indexOf(waiter);
+          if (i >= 0) waiters.splice(i, 1);
+          resolve(null);
+        }, waitMs);
+        waiters.push(waiter);
+      });
+    },
+  };
+}
+/* TURNSTILE_GATE_END */
+
+/* INTAKE_REQUEST_START — webhook request and response classification (tested in tests/test_turnstile_frontend.py) */
+const INTAKE_TIMEOUT_MS = 120000;
+const VERIFICATION_FAILED_MESSAGE = "Verification failed. Complete the verification and try again.";
+const VERIFICATION_UNAVAILABLE_MESSAGE = "Verification service is temporarily unavailable. Please try again shortly.";
+const VERIFICATION_MISSING_MESSAGE = "Verification is not complete yet. Complete the verification and try again.";
+
+// The token travels beside the lead fields, never inside them: n8n moves it
+// into the X-Turnstile-Token header and keeps it out of the lead record.
+function buildWebhookBody(payload, token) {
+  const body = Object.assign({}, payload);
+  if (token) body.turnstile_token = token;
+  return body;
+}
+
+function classifyIntakeResponse(status, data) {
+  const outcome = data && data.outcome;
+  if (status === 201 && outcome === "created" && data.lead) return "created";
+  if (status === 409 || outcome === "duplicate") return "duplicate";
+  if (status === 422 || outcome === "validation_failed") return "validation_failed";
+  if (status === 403 || outcome === "verification_failed") return "verification_failed";
+  if (status === 503 || outcome === "verification_unavailable") return "verification_unavailable";
+  if (status === 502 || outcome === "upstream_error") return "upstream_error";
+  return "other";
+}
+
+// One submission attempt. With a gate, no request is made without a fresh
+// token. The caller keeps the same payload (and external_id) across retries,
+// so a retry after a lost response is answered 409 instead of a second lead.
+async function submitIntake(options) {
+  let token = null;
+  if (options.gate) {
+    token = await options.gate.takeToken(options.tokenWaitMs);
+    if (!token) return { kind: "verification_missing" };
+  }
+  const setTimer = options.setTimer || function(fn, ms) { return setTimeout(fn, ms); };
+  const clearTimer = options.clearTimer || function(id) { clearTimeout(id); };
+  const controller = new AbortController();
+  const timer = setTimer(function() { controller.abort(); }, options.timeoutMs);
+  let res;
+  try {
+    res = await options.fetchImpl(options.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildWebhookBody(options.payload, token)),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimer(timer);
+    return { kind: "network_error", error: err };
+  }
+  clearTimer(timer);
+  let data = null;
+  try { data = await res.json(); } catch (err) { /* non-JSON */ }
+  return { kind: classifyIntakeResponse(res.status, data), status: res.status, data: data };
+}
+/* INTAKE_REQUEST_END */
 
 const DEV_EXTERNAL_ID = new URLSearchParams(window.location.search).get("external_id");
 
@@ -2914,6 +3089,49 @@ if (!CONFIG.webhookUrl) {
   submitLabel.textContent = "Demo unavailable";
 }
 
+/* Cloudflare Turnstile bootstrap. The widget renders lazily when the demo view
+ * (the only view showing the form) becomes visible, including after
+ * history.pushState navigation. Without a site key or a loaded script the gate
+ * stays closed and submissions are refused before any request is made. */
+const turnstileStatus = document.getElementById("turnstile-status");
+const TURNSTILE_BYPASS = CONFIG.turnstileDisabled &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+const TURNSTILE_STATUS_TEXT = {
+  loading: "Loading verification…",
+  pending: "Completing verification…",
+  ready: "Verification complete.",
+  expired: "Verification expired. Refreshing…",
+  error: "Verification needs attention. Complete the check above, or reload the page if it does not recover.",
+  unavailable: "Verification could not load, so the form cannot be sent. Reload the page or try again later.",
+  unconfigured: "Verification is not configured on this site, so the form cannot be sent.",
+};
+function showTurnstileState(state) {
+  if (turnstileStatus) turnstileStatus.textContent = TURNSTILE_STATUS_TEXT[state] || "";
+}
+const turnstileGate = TURNSTILE_BYPASS ? null : createTurnstileGate({
+  siteKey: CONFIG.turnstileSiteKey,
+  container: document.getElementById("turnstile-widget"),
+  getApi: function() { return window.turnstile; },
+  onState: showTurnstileState,
+});
+function ensureTurnstileRendered() {
+  if (turnstileGate && document.documentElement.getAttribute("data-view") === "demo") turnstileGate.render();
+}
+if (!turnstileGate) {
+  if (turnstileStatus) turnstileStatus.textContent = "Verification disabled for local development.";
+} else if (CONFIG.turnstileSiteKey) {
+  showTurnstileState(turnstileGate.state());
+  const turnstileScript = document.createElement("script");
+  turnstileScript.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+  turnstileScript.async = true;
+  turnstileScript.defer = true;
+  turnstileScript.onload = ensureTurnstileRendered;
+  turnstileScript.onerror = function() { turnstileGate.markUnavailable(); };
+  document.head.appendChild(turnstileScript);
+} else {
+  turnstileGate.render(); // reports "unconfigured"; the form stays closed
+}
+
 function mintExternalId() {
   if (DEV_EXTERNAL_ID) return DEV_EXTERNAL_ID;
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -2943,7 +3161,7 @@ function updateTelemetryPreview(customData, title) {
     email: (document.getElementById("email").value || "jamie@example.com").trim(),
     company: (document.getElementById("company").value || "Example Systems").trim(),
     message: (document.getElementById("message").value || "Evaluating automated qualification for inbound leads.").trim(),
-    source: CONFIG.source,
+    source: resolveLeadSource(window.location.pathname),
     external_id: extId
   };
   payloadPreview.textContent = JSON.stringify(preview, null, 2);
@@ -3320,7 +3538,7 @@ async function handleSubmit(event) {
     email: document.getElementById("email").value.trim(),
     company: document.getElementById("company").value.trim(),
     message: document.getElementById("message").value.trim(),
-    source: CONFIG.source,
+    source: resolveLeadSource(window.location.pathname),
     external_id: extId,
     // Demo-only opt-in: the intake workflow then answers after AI enrichment
     // and includes ai_insights for this lead. Other callers get the original
@@ -3328,53 +3546,61 @@ async function handleSubmit(event) {
     demo_insights: true,
   };
 
+  // The stored/displayed payload never contains the Turnstile token.
   lastSubmittedPayload = Object.assign({}, payload);
   setSubmitting(true);
 
   const startTime = performance.now();
-  let res;
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(function() { controller.abort(); }, 120000);
-  try {
-    res = await fetch(CONFIG.webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    window.clearTimeout(timeoutId);
-    setSubmitting(false);
-    const latency = Math.round(performance.now() - startTime);
-    console.warn("[lead-form] intake request did not receive a response:", err);
-    banner.textContent = "No response was received from the intake service. It may still be waking up. Retry with the same demo enquiry—if already saved, duplicate protection may return 409.";
+  const result = await submitIntake({
+    url: CONFIG.webhookUrl,
+    payload: payload,
+    gate: turnstileGate, // null only for the explicit localhost development bypass
+    tokenWaitMs: TURNSTILE_TOKEN_WAIT_MS,
+    timeoutMs: INTAKE_TIMEOUT_MS,
+    fetchImpl: window.fetch.bind(window),
+  });
+  const latency = Math.round(performance.now() - startTime);
+  setSubmitting(false);
+
+  if (result.kind === "verification_missing") {
+    // No request was sent; the same external_id is reused on the next attempt.
+    banner.textContent = VERIFICATION_MISSING_MESSAGE;
     banner.className = "form-banner error";
-    highlightOutcome("Network failure", { error: err.message }, latency);
     return;
   }
-  window.clearTimeout(timeoutId);
+  if (result.kind === "network_error") {
+    console.warn("[lead-form] intake request did not receive a response:", result.error);
+    banner.textContent = "No response was received from the intake service. It may still be waking up. Retry with the same demo enquiry—if already saved, duplicate protection may return 409.";
+    banner.className = "form-banner error";
+    highlightOutcome("Network failure", { error: result.error && result.error.message }, latency);
+    return;
+  }
 
-  const latency = Math.round(performance.now() - startTime);
-  let data = null;
-  try { data = await res.json(); } catch (err) { /* non-JSON */ }
-  setSubmitting(false);
+  const data = result.data;
   lastResponseData = data;
-  console.log("[lead-form] response:", res.status, data && data.outcome);
+  console.log("[lead-form] response:", result.status, data && data.outcome);
 
-  if (res.status === 201 && data && data.outcome === "created" && data.lead) {
+  if (result.kind === "created") {
     highlightOutcome("created", data, latency);
-  } else if (res.status === 409 || (data && data.outcome === "duplicate")) {
+  } else if (result.kind === "duplicate") {
     highlightOutcome("duplicate", data, latency);
-  } else if (res.status === 422 || (data && data.outcome === "validation_failed")) {
+  } else if (result.kind === "validation_failed") {
     renderValidationErrors(data && data.detail);
-  } else if (res.status === 502 || (data && data.outcome === "upstream_error")) {
+  } else if (result.kind === "verification_failed") {
+    // Nothing was stored; the next attempt uses a fresh token and the same external_id.
+    banner.textContent = VERIFICATION_FAILED_MESSAGE;
+    banner.className = "form-banner error";
+  } else if (result.kind === "verification_unavailable") {
+    banner.textContent = VERIFICATION_UNAVAILABLE_MESSAGE;
+    banner.className = "form-banner error";
+  } else if (result.kind === "upstream_error") {
     banner.textContent = "The intake service could not complete this request. Please try again shortly.";
     banner.className = "form-banner error";
     highlightOutcome("Upstream 502", data, latency);
   } else {
-    banner.textContent = "Request completed with status " + res.status + ".";
+    banner.textContent = "Request completed with status " + result.status + ".";
     banner.className = "form-banner error";
-    highlightOutcome("HTTP " + res.status, data, latency);
+    highlightOutcome("HTTP " + result.status, data, latency);
   }
 }
 
@@ -3455,6 +3681,7 @@ function updateView(isDemo, pushStateUrl, options) {
   }
 
   document.documentElement.setAttribute("data-view", isDemo ? "demo" : "landing");
+  if (isDemo) ensureTurnstileRendered();
 
   // Close mobile drawer if open
   if (mobileDrawer && mobileDrawer.classList.contains("open") && mobileMenuBtn) {

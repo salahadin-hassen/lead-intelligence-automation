@@ -30,6 +30,8 @@ services:
         value: 10000
       - key: N8N_WEBHOOK_TARGET
         sync: false # Set to https://<leadintel-n8n>.onrender.com
+      - key: TURNSTILE_SITE_KEY
+        sync: false # PUBLIC Cloudflare Turnstile site key, written into config.js at start (never the secret)
 
   # -------------------------------------------------------------------
   # 2. Application API (FastAPI + psycopg Connection Pool)
@@ -50,6 +52,14 @@ services:
         sync: false # Set to Neon PostgreSQL connection string for lead_app
       - key: API_AUTH_TOKEN
         generateValue: true
+      # Turnstile verification on POST /leads is always enforced here (APP_ENV=production,
+      # and Render sets RENDER=true); a missing secret fails closed with HTTP 503.
+      - key: TURNSTILE_SECRET_KEY
+        sync: false # Cloudflare Turnstile SECRET key; set in the Render dashboard only
+      - key: TURNSTILE_ALLOWED_HOSTNAMES
+        value: leadintel.sahelyon.com
+      - key: TURNSTILE_EXPECTED_ACTION
+        value: lead-intake
 
   # -------------------------------------------------------------------
   # 3. Workflow Engine (n8n v2.41.7)

@@ -271,11 +271,16 @@ def test_created_path_reaches_exactly_one_response_and_one_insights_call(demo, r
     assert "Extract Lead + Score" in reached and "Send Qualified to Telegram" in reached
 
 
-@pytest.mark.parametrize("output,respond", [(1, "Respond Duplicate"), (2, "Respond Validation Failed"), (3, "Respond Upstream Error")])
-def test_duplicate_validation_and_upstream_paths_are_unchanged_and_never_call_ai(output, respond):
+# Task 05B inserted the 403/503 verification outputs (3, 4) before the switch's
+# fallback, which moved from output 3 to output 5; its target is unchanged.
+@pytest.mark.parametrize(
+    "output,head_output,respond",
+    [(1, 1, "Respond Duplicate"), (2, 2, "Respond Validation Failed"), (5, 3, "Respond Upstream Error")],
+)
+def test_duplicate_validation_and_upstream_paths_are_unchanged_and_never_call_ai(output, head_output, respond):
     wf = _workflow(INTAKE_PATH)
     head = _head_intake()
-    assert wf["connections"]["Route on API Status"]["main"][output] == head["connections"]["Route on API Status"]["main"][output]
+    assert wf["connections"]["Route on API Status"]["main"][output] == head["connections"]["Route on API Status"]["main"][head_output]
     assert _walk(wf, "Route on API Status", output, demo=True) == [respond]
 
 
@@ -289,13 +294,54 @@ def test_only_one_insights_request_node_without_retries():
     assert node["parameters"]["options"]["timeout"] <= 30000
 
 
+# Task 05B (Turnstile) changed exactly these node parameters; each change is
+# pinned below so any other edit to them still fails this guard.
+TURNSTILE_CHANGED_NODES = {"Prepare Lead Payload", "Create Lead in FastAPI", "Route on API Status"}
+
+
+def _assert_only_turnstile_changes(old: dict, new: dict) -> None:
+    name = old["name"]
+    if name == "Prepare Lead Payload":
+        added = new["parameters"]["jsCode"]
+        start = added.index("// Cloudflare Turnstile token for FastAPI's X-Turnstile-Token header.")
+        end = added.index("return [{", start)
+        restored = (added[:start] + added[end:]).replace("    lead,\n    turnstileToken,\n", "    lead,\n")
+        assert restored == old["parameters"]["jsCode"]
+    elif name == "Create Lead in FastAPI":
+        headers = new["parameters"]["headerParameters"]["parameters"]
+        assert headers[:-1] == old["parameters"]["headerParameters"]["parameters"]
+        assert headers[-1] == {"name": "X-Turnstile-Token", "value": "={{ $json.turnstileToken }}"}
+        rest = lambda p: {k: v for k, v in p.items() if k != "headerParameters"}  # noqa: E731
+        assert rest(new["parameters"]) == rest(old["parameters"])
+    elif name == "Route on API Status":
+        rules, old_rules = new["parameters"]["rules"]["values"], old["parameters"]["rules"]["values"]
+        assert rules[: len(old_rules)] == old_rules
+        assert [r["outputKey"] for r in rules[len(old_rules):]] == ["verification_failed", "verification_unavailable"]
+        assert new["parameters"]["options"] == old["parameters"]["options"]
+
+
 def test_existing_nodes_credentials_and_notification_wiring_are_unchanged():
     wf, head = _workflow(INTAKE_PATH), _head_intake()
     nodes = {n["name"]: n for n in wf["nodes"]}
     for old in head["nodes"]:
         new = nodes[old["name"]]
         changed = [k for k in set(old) | set(new) if old.get(k) != new.get(k)]
-        assert changed in ([], ["position"]), f"{old['name']} changed: {changed}"
+        if old["name"] in TURNSTILE_CHANGED_NODES:
+            assert changed == ["parameters"], f"{old['name']} changed: {changed}"
+            _assert_only_turnstile_changes(old, new)
+        else:
+            assert changed in ([], ["position"]), f"{old['name']} changed: {changed}"
+    assert set(nodes) - {n["name"] for n in head["nodes"]} == {
+        # AI insights (9109f81)
+        "Demo Insights Requested?",
+        "Generate AI Insights",
+        "Attach AI Insights",
+        "Return AI Insights?",
+        "Respond Created with AI Insights",
+        # Turnstile verification responses (Task 05B)
+        "Respond Verification Failed",
+        "Respond Verification Unavailable",
+    }
     rewired = {src for src in head["connections"] if head["connections"][src] != wf["connections"][src]}
     assert rewired == {"Route on API Status"}
     assert nodes["Generate AI Insights"]["credentials"] == nodes["Create Lead in FastAPI"]["credentials"]

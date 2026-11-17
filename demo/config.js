@@ -9,4 +9,10 @@
  * ===================================================================== */
 window.LEAD_FORM_CONFIG = {
   webhookUrl: "http://localhost:5679/webhook/lead-intake",
+  // PUBLIC Turnstile site key (deployments generate this file with theirs).
+  turnstileSiteKey: "",
+  // Local development only: the page honours this on localhost/127.0.0.1 and
+  // ignores it everywhere else. The API must also run with
+  // TURNSTILE_ENABLED=false (never honoured in production).
+  turnstileDisabled: true,
 };

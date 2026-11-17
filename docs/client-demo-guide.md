@@ -9,16 +9,59 @@
 - **Target Duration:** 3 to 5 minutes.
 - **Audience:** Business owners, Heads of Sales/RevOps, Technical Product Managers, or Freelance Clients.
 - **Public Demo URL:** `https://leadintel.sahelyon.com`
-- **Environment:** Live production deployment on Render with serverless Neon PostgreSQL.
+- **Environment:** Public deployment on Render free tier (separate Caddy, n8n and API services) with serverless Neon PostgreSQL, served through Cloudflare. Last recorded end-to-end production verification: commit `2fc400f`. A read-only check on 2026-11-16 found `/` and `/demo` returning HTTP 200, serving `demo/lead-form.html` from commit `9109f81`. The live n8n workflow and API configuration were not inspected, so the readiness check below doubles as your go/no-go check.
 
-### 5-Minute Pre-Call Warm-Up (Cold-Start Mitigation)
+### What This Demo Shows — and What It Does Not
 
-Render's free tier spins down web services after 15 minutes of inactivity. To reduce the likelihood of encountering a container cold start during your client demonstration:
+Present only the first group as working functionality.
 
-1. **5 minutes before the meeting:** Open `https://leadintel.sahelyon.com/` in an Incognito/Private browser tab.
-2. **Click "Try Demo":** Navigate to the `/demo` page.
-3. **Submit a warm-up inquiry:** Use the "Enterprise Demo" preset to wake up the Caddy proxy, n8n orchestrator, and FastAPI container.
-4. **Observe confirmation:** Once the confirmation appears, the containers are active. While free-tier platform behavior can still introduce occasional delays, this step substantially reduces the chance of a sleep delay during your live call.
+| Status | Capability |
+| :--- | :--- |
+| **Demonstrable live (historically live-verified at `2fc400f`)** | Landing page and `/demo` route, form validation, lead intake (HTTP 201), qualification score and reason, duplicate rejection (HTTP 409), request/response details panel. |
+| **Visible on the public page, runtime state unverified** | The **"AI lead insights"** box under the score. It is part of the served page, but what it shows depends on the live API configuration and the live n8n workflow, and neither has been verified. See [AI Insights Panel States](#ai-insights-panel-states). |
+| **Locally verified only (automated tests, isolated test database)** | Optional LLM scoring with heuristic fallback, Telegram/WhatsApp alert routing, Gmail intake normalization, AI lead insights generation. |
+| **Not production-verified — do not present as live services** | LLM scoring (`render.yaml` sets no `LLM_API_KEY`, so scores are expected to come from the deterministic heuristic), WhatsApp delivery, Gmail intake, end-to-end AI insights delivery. |
+| **Pending external credentials / manual configuration** | WhatsApp: Meta Developer account, credentials, approved templates. Gmail: Google OAuth credential bound in n8n. AI insights: confirm the live n8n `lead-intake` workflow and the Render settings `AI_INSIGHTS_ENABLED` / `OPENAI_API_KEY` (rollout steps in `docs/ai-lead-insights.md` §8). |
+
+Telegram alert delivery was verified in a local rehearsal (execution 135) and is not visible to the client on screen; describe it, do not claim to show it.
+
+### Pre-Call Readiness Check (Cold-Start Mitigation)
+
+Render's free tier puts each service to sleep after 15 minutes without traffic, and each one wakes **independently**. Caddy serves the landing page itself, so a fast-loading page does **not** mean the API or n8n are awake. Any keep-warm ping aimed at the site does not wake them either.
+
+What a cold start looked like on 2026-11-16:
+
+| Service | Cold-start observation |
+| :--- | :--- |
+| API `GET /health` | ~23.3 s |
+| n8n `GET /healthz` | First request timed out after 150 s. A retry answered after ~96.9 s, about 4 minutes after the first request. |
+| Demo form | Aborts each request after **120 s** |
+
+A cold n8n can take longer than the form's 120-second timeout, so wake each service on its own using its health URL. Start **at least 15 minutes before the meeting**:
+
+1. **Wake the API:** open `https://leadintel-api-2y0i.onrender.com/health` in a browser tab and wait for `{"status":"ok"}`. If the tab times out or errors, reload it.
+2. **Wake n8n:** open `https://leadintel-n8n.onrender.com/healthz` in another tab and wait for `{"status":"ok"}`. Expect this to take several minutes, and the first attempt may time out; reload until it answers.
+3. **Load the page:** open `https://leadintel.sahelyon.com/` in an Incognito/Private tab, click **"Try demo →"**, and check that the form renders. **Do not submit anything.**
+4. **Keep them awake:** each service sleeps again after 15 minutes without traffic. If more than ~10 minutes will pass before the live submission, reload both health URLs shortly before you start.
+
+**What the health checks prove, and what they don't.** The two health URLs are read-only and create no data. `{"status":"ok"}` only means the service process is up and answering; the API check also confirms it can reach its database. Neither check runs the intake workflow. They don't prove that a submission will be accepted, scored, deduplicated or alerted, or which state the AI-insights box will show. The first live submission of the meeting is therefore the first end-to-end run, so be ready for any of the [AI Insights Panel States](#ai-insights-panel-states).
+
+**No warm-up submissions on production.** Do not submit a lead on `leadintel.sahelyon.com` just to warm services up or to preview results. Every production submission creates a real lead record and can trigger operator notifications (Telegram, and WhatsApp once configured) and, depending on configuration, a paid AI call. A rehearsal submission is acceptable only:
+- in an isolated synthetic/demo environment that is not connected to the production database, notification channels or AI keys, such as the local stack in [`deployment.md`](deployment.md); **or**
+- under an explicitly approved production test procedure that defines the synthetic test data, how notifications and AI calls are suppressed or expected, and how the test records are identified afterwards.
+
+No such production test procedure is documented yet.
+
+**Go/no-go decision:**
+
+| Check | GO | NO-GO |
+| :--- | :--- | :--- |
+| API `/health` | `{"status":"ok"}` | No answer after several reloads, or any error |
+| n8n `/healthz` | `{"status":"ok"}` | No answer after several reloads (allow ~5 minutes), or any error |
+| Landing page and `/demo` | Page and form render | Page fails to load |
+| Time since last health check | Under ~10 minutes, or re-checked | Over 15 minutes and not re-checked |
+
+**GO** only when every row is GO. You then run the live walkthrough, knowing the first submission is the first end-to-end run. On **NO-GO**, don't run the live walkthrough; use a recorded walkthrough or the repository tour in [`project-evaluation-guide.md`](project-evaluation-guide.md) instead. If the first live submission fails during the meeting, follow the [Contingency Playbook](#3-contingency-playbook-handling-free-tier-cold-starts).
 
 ---
 
@@ -37,7 +80,7 @@ Render's free tier spins down web services after 15 minutes of inactivity. To re
 
 - **Action:** Share your screen with `https://leadintel.sahelyon.com/` open.
 - **What to Observe:** The landing page opens cleanly at the top of the viewport (`scrollY: 0`). The interactive demo form is cleanly separated from the marketing copy.
-- **Action:** Click the top-nav **"Try Demo"** or hero CTA button.
+- **Action:** Click the header **"Try demo →"** button or the **"Interactive demo"** nav link.
 - **Expected Result:** The browser transitions smoothly to the dedicated route `https://leadintel.sahelyon.com/demo` at `scrollY: 0`, focusing user attention directly on the interactive lead intake card.
 - **Presenter Script:**
   > *"When a prospective client lands on your website, speed and clarity matter. But most inbound lead forms are either disconnected from backend automation or dump data into a shared spreadsheet.*
@@ -48,26 +91,40 @@ Render's free tier spins down web services after 15 minutes of inactivity. To re
 
 ### Step 2: Inbound Ingestion & Real-Time Intent Scoring (0:45 – 2:00)
 
-**Goal:** Demonstrate clean form validation, immediate user feedback, and transparent AI intent scoring.
+**Goal:** Demonstrate clean form validation, immediate user feedback, and transparent intent scoring.
 
-- **Action:** On the `/demo` page, click the preset **"Enterprise Demo"** (or enter realistic synthetic data):
+- **Action:** On the `/demo` page, click the preset **"Enterprise buyer"** (or enter realistic synthetic data, for example):
   - **Full Name:** `Alex Carter`
   - **Work Email:** `alex@enterprise-acme.com` *(notice corporate domain)*
   - **Company:** `Acme Corporation`
   - **Inquiry Details:** `Evaluating enterprise automation for our 200-person sales team. Need pricing, security review, and integration demo.`
-- **Action:** Click **"Submit Lead Inquiry"**.
+- **Action:** Click **"Send demo enquiry →"**.
 - **Expected Result:**
-  1. The submit button immediately enters a disabled state with an active loading indicator ("Submitting…").
+  1. The submit button immediately enters a disabled state with an active loading indicator ("Sending to intake…").
   2. Within typical warm response times (observed around 4–5 seconds during verification), the form transitions to an emerald confirmation panel: **"Enquiry accepted"**.
-  3. The **AI Lead Score Breakdown** displays a high score (typically **80–100/100**) with the detected rationale (e.g., *"corporate email domain; high-intent buying signals: pricing, enterprise, integration"*).
+  3. The **Qualification score** gauge displays a high score with the detected rationale. With the deterministic heuristic scorer, the "Enterprise buyer" preset scores **100/100** and the Alex Carter example **95/100** (reason e.g. *"High-intent keywords (demo, pricing, enterprise, integration); substantial message; corporate email domain"*).
+  4. Below the score, the public page shows an **"AI lead insights"** box. Its content depends on the live backend and is **not guaranteed**. Describe whichever state appears (see [AI Insights Panel States](#ai-insights-panel-states)), and never promise that generated insights will appear.
 - **Presenter Script:**
   > *"When Alex clicks submit, three critical things happen behind the scenes:*
   >
   > *First, the client generates a unique submission key (`external_id`) to identify this specific inquiry.*
   > *Second, the inquiry is validated and safely committed to a relational PostgreSQL database.*
-  > *Third, our hybrid scoring engine analyzes the prospect’s purchase intent. Because Alex used a corporate domain and requested enterprise pricing and integration for a 200-person team, the system scores this lead at the highest priority level.*
+  > *Third, a deterministic scoring engine analyzes the prospect’s purchase intent (an LLM scorer can be switched on, with automatic fallback). Because Alex used a corporate domain and requested enterprise pricing and integration for a 200-person team, the system scores this lead at the highest priority level.*
   >
   > *Notice that Alex receives an immediate, professional confirmation without having to wait for downstream operator notifications to process."*
+
+#### AI Insights Panel States
+
+The box's badge depends on what the live n8n workflow and API return for this particular submission. None of these states has been confirmed as current production behaviour, and the health checks can't reveal which one will appear, so be ready for any of them.
+
+| Badge | What it means | What to say |
+| :--- | :--- | :--- |
+| **Not returned** | The intake response contained no `ai_insights`. This is what happens if the live n8n workflow doesn't request insights. | *"The lead was saved and scored; AI suggestions are an optional add-on that isn't enabled on this demo."* |
+| **Disabled** | The API reports AI insights turned off (`AI_INSIGHTS_ENABLED` not enabled). | Same as above. |
+| **Failed** | An AI call was attempted but didn't produce a result (timeout, rate limit, exhausted quota or budget cap, or invalid output). | *"The lead was saved and scored regardless; AI suggestions never block intake."* |
+| **Generated** (successful insights) | Summary, intent, urgency, recommended next action and reasoning, labelled with the model name. | Present them as AI-generated suggestions for a sales rep to review, not decisions. The score is calculated separately and is unchanged by AI. |
+
+The page can also show **Unavailable** (for example a response for a different lead, or an HTTP error from the insights call) or **Pending**. Treat them like **Failed**. In every state the lead is still saved and scored.
 
 ---
 
@@ -75,12 +132,12 @@ Render's free tier spins down web services after 15 minutes of inactivity. To re
 
 **Goal:** Demonstrate data integrity that protects sales reps from redundant records and split attribution.
 
-- **Action:** In the green outcome panel, point out the action button: **"Test Duplicate Detection (Replay Lead)"**.
+- **Action:** In the green outcome panel, point out the action button: **"Re-submit (Test Duplicate)"**.
 - **Action:** Click the button to resubmit the identical lead inquiry.
 - **Expected Result:**
   1. The intake pipeline processes the request within typical warm response times.
   2. The UI renders an amber warning panel: **"Duplicate Ingestion Blocked (409)"**.
-  3. The message confirms: *"A lead with this source and external_id already exists"*.
+  3. The message confirms: *"The API rejected this source and external ID pair; no duplicate lead was created."*
 - **Presenter Script:**
   > *"In real business operations, prospects double-click submit buttons, refresh their confirmation tabs, or submit the same form twice across different marketing campaigns.*
   >
@@ -94,17 +151,17 @@ Render's free tier spins down web services after 15 minutes of inactivity. To re
 
 **Goal:** Explain the technical architecture, business guarantees, and failure isolation without overwhelming the client.
 
-- **Action:** Scroll down slightly on the demo page to the **Live Architecture Telemetry** panel (or reference the architecture overview).
+- **Action:** Click **"View request / response details"** on the demo page to show the request and response JSON (or reference the architecture overview).
 - **Presenter Script:**
-  > *"Here is why this architecture is enterprise-ready compared to standard no-code automations:*
+  > *"Here is why this architecture is more robust than standard no-code automations:*
   >
   > *1. **Decoupled Responsibilities:** FastAPI handles data integrity, validation, and calculations. n8n handles routing and external messaging. PostgreSQL enforces database rules.*
   >
-  > *2. **Automatic AI Fallback:** If the external AI language model times out or hits an API rate limit, the system does not crash or drop the lead. It automatically switches to an offline, deterministic heuristic analyzer based on keyword signals and domain authority.*
+  > *2. **Automatic AI Fallback:** When optional LLM scoring is switched on and the external model times out or hits an API rate limit, the system does not crash or drop the lead. It automatically switches to an offline, deterministic heuristic analyzer based on keyword signals and domain authority — the same analyzer that scored the lead you just saw.*
   >
   > *3. **Caller-Response Isolation:** Our webhook confirms the lead to the visitor as soon as it is safely stored in PostgreSQL. If downstream notification channels experience a temporary outage, the lead is already safe in the database and the customer never sees a broken 500 error.*
   >
-  > *4. **Smart Notification Routing:** Leads scoring 70 and above trigger instant mobile alerts to your sales reps. Lower-intent inquiries from personal email addresses are logged quietly in the database without distracting your team."*
+  > *4. **Smart Notification Routing:** Leads scoring 70 and above trigger a Telegram alert to your sales reps. Lower-intent inquiries are logged quietly in the database without distracting your team. WhatsApp alerts are already wired into the same routing and go live once your Meta Business credentials are connected."*
 
 ---
 
@@ -114,11 +171,11 @@ Render's free tier spins down web services after 15 minutes of inactivity. To re
 
 - **Action:** Click **"← Back to overview"** to return smoothly to the marketing landing page.
 - **Presenter Script:**
-  > *"What we’ve just seen is a working, production-tested reference architecture. Everything you see here can be tailored to your specific workflow:*
+  > *"What we’ve just seen is a working reference architecture for website intake, scoring and deduplication. It can be tailored to your specific workflow:*
   >
   > *- We can customize the scoring algorithm to match your exact Ideal Customer Profile (ICP).*
-  > *- We can route alerts directly to your team’s Slack, Microsoft Teams, or WhatsApp.*
-  > *- We can connect downstream tools like HubSpot, Salesforce, or your custom database.*
+  > *- We can route alerts to your team’s Telegram today, and to WhatsApp once Meta credentials are set up; Slack or Microsoft Teams would be new integration work.*
+  > *- Downstream tools like HubSpot, Salesforce, or your custom database would be new integration work; CRM sync is not built yet.*
   >
   > *What questions do you have about adapting this pipeline for your team?"*
 
@@ -126,16 +183,18 @@ Render's free tier spins down web services after 15 minutes of inactivity. To re
 
 ## 3. Contingency Playbook: Handling Free-Tier Cold Starts
 
-Because the public demo sandbox is deployed on Render's zero-cost tier, you may occasionally trigger a cold start if you were unable to run the 5-minute pre-call warm-up.
+Because the public demo sandbox is deployed on Render's zero-cost tier, you can still hit a cold start if you skipped the [pre-call readiness check](#pre-call-readiness-check-cold-start-mitigation) or the meeting started more than 15 minutes after it.
 
-### If a Submission Takes ~40–50 Seconds to Respond:
+### If a Submission Is Slow or Times Out
 
-1. **Stay Calm & Point Out the Loading State:** The UI includes an explicit loading spinner and disables the button, preventing double-clicks.
+1. **Stay Calm & Point Out the Loading State:** The UI shows a loading spinner and disables the button, preventing double-clicks.
 2. **Use the Opportunity as an Architectural Talking Point:**
-   > *"Notice that the interface is awaiting confirmation. Our public demo sandbox is hosted on a zero-cost cloud tier where container instances sleep when idle.*
-   >
-   > *To accommodate this, the client interface has a built-in 120-second connection timeout so a cold container boot doesn't cause the browser to fail the request prematurely. In a commercial production environment with dedicated instances, containers remain warm 24/7 without sleep-induced latency."*
-3. **Wait for the Green Outcome Card:** As soon as the container boots, the response will arrive and the green card will render as expected.
+   > *"Notice that the interface is awaiting confirmation. Our public demo sandbox is hosted on a zero-cost cloud tier where services sleep when idle and wake on demand. In a commercial deployment with dedicated instances, services stay warm and this delay doesn't occur."*
+3. **If the green outcome card arrives:** continue the walkthrough as normal.
+4. **If the request times out:** after 120 s the page shows *"No response was received from the intake service. It may still be waking up…"*. A cold n8n can take several minutes, so the result may arrive only after the browser has given up. Open `https://leadintel-n8n.onrender.com/healthz` in another tab and wait for `{"status":"ok"}`. Then click submit again **without editing any field or clicking a preset**, since either would generate a new submission key:
+   - **"Enquiry accepted"** means the first request never reached the database.
+   - **"Duplicate Ingestion Blocked (409)"** means the first request was saved after all. You can present this as the duplicate-protection step.
+5. **If n8n still doesn't answer:** stop the live demo and switch to the recorded walkthrough.
 
 ---
 
