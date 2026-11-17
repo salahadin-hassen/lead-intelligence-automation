@@ -392,3 +392,183 @@ def test_page_contains_no_turnstile_secret():
     page = _page().lower()
     assert "secret" not in page.replace("never the secret", "").replace("the secret stays on the api", "")
     assert "siteverify" not in page
+
+
+# --- error banner visibility (Task 07C) ------------------------------------------
+# clearAllErrors() used to leave an inline display:none on #banner, which
+# overrides ".form-banner.error { display: block }": every error that is shown
+# only in the banner (missing token, 403, 503, validation) stayed invisible.
+
+
+def test_clear_all_errors_leaves_no_inline_style_on_the_banner():
+    block = _block("/* CLEAR_ERRORS_START", "/* CLEAR_ERRORS_END */")
+    script = r"""
+      const block = process.argv[1];
+      const attrs = { style: "display: block; color: orange" };
+      const banner = { textContent: "old notice", className: "form-banner error", style: { display: "block" },
+        removeAttribute(name) { delete attrs[name]; if (name === "style") this.style = {}; } };
+      const FIELDS = ["name"];
+      const document = { getElementById: () => null };
+      new Function("banner", "FIELDS", "document", block + "; clearAllErrors();")(banner, FIELDS, document);
+      console.log(JSON.stringify({ text: banner.textContent, cls: banner.className,
+        hasStyleAttr: "style" in attrs, inlineDisplay: banner.style.display || null }));
+    """
+    res = subprocess.run(["node", "-e", script, block], capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == {"text": "", "cls": "form-banner", "hasStyleAttr": False, "inlineDisplay": None}
+
+
+def test_page_never_hides_the_banner_with_an_inline_display_none():
+    page = _page()
+    assert not re.search(r"banner\.style\.display\s*=\s*[\"']none[\"']", page)
+    # Visibility stays with the CSS classes.
+    assert re.search(r"\.form-banner \{\s*display: none;", page)
+    assert re.search(r"\.form-banner\.error \{\s*display: block;", page)
+
+
+def _chrome() -> str | None:
+    import shutil
+
+    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
+
+# The real page with only two things replaced: the Turnstile script (a stub API
+# that either issues a token or never does) and window.fetch (a stub returning
+# the scenario's response). Nothing leaves the machine.
+_BROWSER_STUB = r"""<script>
+window.LEAD_FORM_CONFIG = { webhookUrl: "/webhook/lead-intake", turnstileSiteKey: "public-site-key" };
+window.__fetches = [];
+window.__scenario = __SCENARIO__;
+window.fetch = function(url, init) {
+  window.__fetches.push({ url: url, method: init.method, body: JSON.parse(init.body) });
+  const r = window.__scenario.response;
+  return Promise.resolve({ status: r.status, json: function() { return Promise.resolve(r.data); } });
+};
+window.turnstile = {
+  render: function(el, opts) {
+    if (window.__scenario.token) setTimeout(function() { opts.callback("stub-token-" + "x".repeat(16)); }, 100);
+    return "widget-1";
+  },
+  reset: function() {},
+};
+</script>"""
+
+_BROWSER_PROBE = r"""<script>
+window.addEventListener("load", function() { setTimeout(function() {
+  const set = function(id, v) { document.getElementById(id).value = v; };
+  if (window.__scenario.duplicatePreset) document.getElementById("preset-duplicate").click();
+  set("name", "Synthetic Test Lead"); set("email", "e2e-turnstile-check@example.com");
+  set("company", "Example Synthetic Org");
+  set("message", "Synthetic end-to-end verification submission. Please disregard this record.");
+  document.getElementById("lead-form").requestSubmit();
+  setTimeout(function() {
+    const b = document.getElementById("banner"), cs = getComputedStyle(b), rect = b.getBoundingClientRect();
+    const probe = document.createElement("div"); probe.className = "form-banner error";
+    b.parentNode.insertBefore(probe, b); const errorColor = getComputedStyle(probe).color; probe.remove();
+    const out = {
+      bannerText: b.textContent, bannerClass: b.className, bannerDisplay: cs.display,
+      bannerHeight: Math.round(rect.height), bannerInlineDeclarations: b.style.length,
+      bannerColorIsErrorColor: cs.color === errorColor,
+      outcomeVisible: document.getElementById("outcome-panel").classList.contains("visible"),
+      submitDisabled: document.getElementById("submit-btn").disabled,
+      fetches: window.__fetches.map(function(f) { return { url: f.url, method: f.method, keys: Object.keys(f.body).sort() }; }),
+    };
+    const pre = document.createElement("pre"); pre.id = "RESULT"; pre.textContent = JSON.stringify(out);
+    document.body.appendChild(pre);
+  }, 17000);
+}, 300); });
+</script></body>"""
+
+
+def _run_page_in_browser(tmp_path: Path, scenario: dict) -> dict:
+    import html
+    import os
+
+    chrome = _chrome()
+    if chrome is None:
+        pytest.skip("Chrome/Chromium is not installed")
+    page = _page()
+    stub = _BROWSER_STUB.replace("__SCENARIO__", json.dumps(scenario))
+    assert page.count('<script src="/config.js"></script>') == 1
+    page = page.replace('<script src="/config.js"></script>', stub, 1)
+    api_url = '"https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"'
+    assert page.count(api_url) == 1
+    page = page.replace(api_url, '"data:text/javascript,"', 1)
+    page = page.replace("</body>", _BROWSER_PROBE, 1)
+    page_file = tmp_path / "index.html"
+    page_file.write_text(page, encoding="utf-8")
+    args = [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+            f"--user-data-dir={tmp_path / 'profile'}", "--window-size=1366,768",
+            "--virtual-time-budget=30000", "--dump-dom", page_file.as_uri() + "?view=demo"]
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        args.insert(1, "--no-sandbox")
+    res = subprocess.run(args, capture_output=True, text=True, timeout=120)
+    match = re.search(r'<pre id="RESULT">(.*?)</pre>', res.stdout, re.S)
+    assert match, f"page probe produced no result (exit {res.returncode}): {res.stderr[-2000:]}"
+    return json.loads(html.unescape(match.group(1)))
+
+
+def _assert_visible_error(out: dict, message: str) -> None:
+    assert out["bannerText"] == message
+    assert out["bannerClass"] == "form-banner error"
+    assert out["bannerDisplay"] == "block"
+    assert out["bannerHeight"] > 0
+    # No inline declarations at all (Chromium may serialise that as no attribute
+    # or as an empty style="" — both mean nothing overrides the CSS classes).
+    assert out["bannerInlineDeclarations"] == 0
+    assert out["bannerColorIsErrorColor"] is True
+    assert out["submitDisabled"] is False
+
+
+def test_browser_missing_token_error_is_visible_and_nothing_is_sent(tmp_path):
+    out = _run_page_in_browser(tmp_path, {"token": False, "response": {"status": 201, "data": {}}})
+    _assert_visible_error(out, "Verification is not complete yet. Complete the verification and try again.")
+    assert out["fetches"] == []
+    assert out["outcomeVisible"] is False
+
+
+@pytest.mark.parametrize(
+    ("status", "outcome", "message"),
+    [
+        (403, "verification_failed", "Verification failed. Complete the verification and try again."),
+        (503, "verification_unavailable",
+         "Verification service is temporarily unavailable. Please try again shortly."),
+    ],
+)
+def test_browser_verification_errors_are_visible(tmp_path, status, outcome, message):
+    data = {"outcome": outcome, "message": message}
+    out = _run_page_in_browser(tmp_path, {"token": True, "response": {"status": status, "data": data}})
+    _assert_visible_error(out, message)
+    assert len(out["fetches"]) == 1
+    assert out["outcomeVisible"] is False
+
+
+def test_browser_error_after_duplicate_preset_uses_error_styling(tmp_path):
+    # The duplicate-test preset leaves inline notice colours on the banner; a
+    # later error must not inherit them (or an inline display).
+    data = {"outcome": "verification_failed", "message": "x"}
+    out = _run_page_in_browser(
+        tmp_path, {"token": True, "duplicatePreset": True, "response": {"status": 403, "data": data}}
+    )
+    _assert_visible_error(out, "Verification failed. Complete the verification and try again.")
+
+
+def test_browser_successful_submission_is_unchanged(tmp_path):
+    lead = {"lead_id": 101, "name": "Synthetic Test Lead", "email": "e2e-turnstile-check@example.com",
+            "company": "Example Synthetic Org", "source": "website-demo-contact-form", "status": "new",
+            "created_at": "2026-11-17T12:00:00Z", "score": 63,
+            "score_reason": "corporate email domain; strong source (contact form)"}
+    data = {"outcome": "created", "apiStatus": 201, "lead": lead, "score": 63, "score_reason": lead["score_reason"]}
+    out = _run_page_in_browser(tmp_path, {"token": True, "response": {"status": 201, "data": data}})
+    assert out["outcomeVisible"] is True
+    assert out["bannerText"] == ""
+    assert out["bannerDisplay"] == "none"
+    assert out["submitDisabled"] is False
+    assert out["fetches"] == [{
+        "url": "/webhook/lead-intake", "method": "POST",
+        "keys": ["company", "demo_insights", "email", "external_id", "message", "name", "source", "turnstile_token"],
+    }]

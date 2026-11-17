@@ -127,12 +127,23 @@ def test_gmail_sends_fixed_trusted_channel_header_and_no_token():
     assert "turnstile" not in GMAIL.read_text(encoding="utf-8").lower()
 
 
-def test_gmail_workflow_otherwise_unchanged_from_head():
-    head = json.loads(subprocess.check_output(["git", "show", "HEAD:n8n/gmail-lead-intake.json"], cwd=REPO_ROOT))
+# Last commit that changed n8n/gmail-lead-intake.json before the Turnstile
+# release (367940a); its content is byte-identical at 9109f81 and e141b0c.
+# Pinned rather than HEAD: once the release was committed, HEAD already
+# contained the header and the comparison added it twice.
+GMAIL_PRE_TURNSTILE_COMMIT = "c13d78f"
+
+
+def test_gmail_workflow_otherwise_unchanged_from_pre_turnstile_baseline():
+    base = json.loads(
+        subprocess.check_output(["git", "show", f"{GMAIL_PRE_TURNSTILE_COMMIT}:n8n/gmail-lead-intake.json"], cwd=REPO_ROOT)
+    )
     new = _wf(GMAIL)
-    head_hdrs = {n["name"]: n for n in head["nodes"]}["Create Lead in FastAPI"]["parameters"]["headerParameters"]
-    head_hdrs["parameters"].append({"name": "X-Intake-Channel", "value": "gmail"})
-    assert new == head
+    base_hdrs = {n["name"]: n for n in base["nodes"]}["Create Lead in FastAPI"]["parameters"]["headerParameters"]
+    # Guard: the baseline must predate the trusted-channel header.
+    assert all(h["name"] != "X-Intake-Channel" for h in base_hdrs["parameters"])
+    base_hdrs["parameters"].append({"name": "X-Intake-Channel", "value": "gmail"})
+    assert new == base
 
 
 @pytest.mark.parametrize("path", [INTAKE, AI_DEMO], ids=lambda p: p.name)

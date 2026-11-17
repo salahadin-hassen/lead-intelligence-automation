@@ -3257,10 +3257,16 @@ function setFieldError(fieldName, message) {
   }
 }
 
+/* CLEAR_ERRORS_START — banner reset (tested in tests/test_turnstile_frontend.py)
+ * The banner's visibility belongs to its CSS classes: hidden as "form-banner",
+ * shown as "form-banner error". The only inline styles it ever carries are the
+ * duplicate-test preset's notice styles, so dropping the whole style attribute
+ * restores the markup's original state. An inline display:none here would
+ * override ".form-banner.error" and hide every later error message. */
 function clearAllErrors() {
   banner.textContent = "";
   banner.className = "form-banner";
-  banner.style.display = "none";
+  banner.removeAttribute("style");
   FIELDS.forEach(function(f) {
     const wrap = document.getElementById("field-" + f);
     const input = document.getElementById(f);
@@ -3270,6 +3276,7 @@ function clearAllErrors() {
     if (errorEl) errorEl.textContent = "";
   });
 }
+/* CLEAR_ERRORS_END */
 
 function validateForm() {
   let firstInvalid = null;
